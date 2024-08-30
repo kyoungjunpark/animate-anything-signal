@@ -19,52 +19,56 @@ decord.bridge.set_bridge('torch')
 from torch.utils.data import Dataset
 from einops import rearrange, repeat
 
+
 # Inspired by the VideoMAE repository.
 def normalize_input(
-    item, 
-    mean=[0.485, 0.456, 0.406], 
-    std=[0.229, 0.224, 0.225],
-    use_simple_norm=True
+        item,
+        mean=[0.485, 0.456, 0.406],
+        std=[0.229, 0.224, 0.225],
+        use_simple_norm=True
 ):
     if item.dtype == torch.uint8 and not use_simple_norm:
         item = rearrange(item, 'f c h w -> f h w c')
-        
+
         item = item.float() / 255.0
         mean = torch.tensor(mean)
         std = torch.tensor(std)
 
         out = rearrange((item - mean) / std, 'f h w c -> f c h w')
-        
+
         return out
     else:
         # Normalize between -1 & 1
         item = rearrange(item, 'f c h w -> f h w c')
-        return  rearrange(item / 127.5 - 1.0, 'f h w c -> f c h w')
-            
+        return rearrange(item / 127.5 - 1.0, 'f h w c -> f c h w')
+
+
 def get_prompt_ids(prompt, tokenizer):
     if tokenizer is None:
         prompt_ids = torch.tensor([0])
     else:
         prompt_ids = tokenizer(
-                prompt,
-                truncation=True,
-                padding="max_length",
-                max_length=tokenizer.model_max_length,
-                return_tensors="pt",
+            prompt,
+            truncation=True,
+            padding="max_length",
+            max_length=tokenizer.model_max_length,
+            return_tensors="pt",
         ).input_ids[0]
     return prompt_ids
 
+
 def read_caption_file(caption_file):
-        with open(caption_file, 'r', encoding="utf8") as t:
-            return t.read()
+    with open(caption_file, 'r', encoding="utf8") as t:
+        return t.read()
+
 
 def get_text_prompt(
-        text_prompt: str = '', 
-        fallback_prompt: str= '',
-        file_path:str = '', 
+        text_prompt: str = '',
+        fallback_prompt: str = '',
+        file_path: str = '',
         ext_types=['.mp4'],
         use_caption=False
-    ):
+):
     try:
         if use_caption:
             if len(text_prompt) > 1: return text_prompt
@@ -73,13 +77,13 @@ def get_text_prompt(
             for ext in ext_types:
                 maybe_file = file_path.replace(ext, '.txt')
                 if maybe_file.endswith(ext_types): continue
-                if os.path.exists(maybe_file): 
+                if os.path.exists(maybe_file):
                     caption_file = maybe_file
                     break
 
             if os.path.exists(caption_file):
                 return read_caption_file(caption_file)
-            
+
             # Return fallback prompt if no conditions are met.
             return fallback_prompt
 
@@ -88,17 +92,17 @@ def get_text_prompt(
         print(f"Couldn't read prompt caption for {file_path}. Using fallback.")
         return fallback_prompt
 
-    
+
 def get_frame_batch(max_frames, sample_fps, vr, transform):
     native_fps = vr.get_avg_fps()
     max_range = len(vr)
     frame_step = max(1, round(native_fps / sample_fps))
     frame_range = range(0, max_range, frame_step)
     if len(frame_range) < max_frames:
-        frame_range =  np.linspace(0, max_range-1, max_frames).astype(int)
-    #start = random.randint(0, len(frame_range) - max_frames)
+        frame_range = np.linspace(0, max_range - 1, max_frames).astype(int)
+    # start = random.randint(0, len(frame_range) - max_frames)
     start = len(frame_range) - max_frames
-    frame_range_indices = list(frame_range)[start:start+max_frames]
+    frame_range_indices = list(frame_range)[start:start + max_frames]
     frames = vr.get_batch(frame_range_indices)
     video = rearrange(frames, "f h w c -> f c h w")
     video = transform(video)
@@ -110,36 +114,36 @@ def process_video(vid_path, use_bucketing, w, h, get_frame_buckets, get_frame_ba
         vr = decord.VideoReader(vid_path)
         resize = get_frame_buckets(vr)
         video = get_frame_batch(vr, resize=resize)
-
     else:
         vr = decord.VideoReader(vid_path)
         video = get_frame_batch(vr)
 
     return video, vr
 
+
 # https://github.com/ExponentialML/Video-BLIP2-Preprocessor
 class VideoBLIPDataset(Dataset):
     def __init__(
             self,
-            tokenizer = None,
+            tokenizer=None,
             width: int = 256,
             height: int = 256,
             n_sample_frames: int = 4,
             sample_start_idx: int = 1,
             fps: int = 1,
-            json_path: str ="",
-            json_data = None,
+            json_path: str = "",
+            json_data=None,
             vid_data_key: str = "video_path",
             preprocessed: bool = False,
             use_bucketing: bool = False,
-            motion_threshold = 50,
+            motion_threshold=50,
             **kwargs
     ):
         self.vid_types = (".mp4", ".avi", ".mov", ".webm", ".flv", ".mjpeg")
         self.use_bucketing = use_bucketing
         self.tokenizer = tokenizer
         self.preprocessed = preprocessed
-        
+
         self.vid_data_key = vid_data_key
         self.train_data = self.load_from_json(json_path, json_data)
         self.motion_threshold = motion_threshold
@@ -150,7 +154,7 @@ class VideoBLIPDataset(Dataset):
         self.sample_start_idx = sample_start_idx
         self.fps = fps
         self.transform = T.Compose([
-            #T.RandomResizedCrop(size=(height, width), scale=(0.8, 1.0), ratio=(width/height, width/height), antialias=False)
+            # T.RandomResizedCrop(size=(height, width), scale=(0.8, 1.0), ratio=(width/height, width/height), antialias=False)
             T.Resize(min(height, width), antialias=False),
             T.CenterCrop([height, width])
         ])
@@ -160,8 +164,8 @@ class VideoBLIPDataset(Dataset):
         for data in json_data['data']:
             for nested_data in data['data']:
                 self.build_json_dict(
-                    data, 
-                    nested_data, 
+                    data,
+                    nested_data,
                     extended_data
                 )
         json_data = extended_data
@@ -169,14 +173,14 @@ class VideoBLIPDataset(Dataset):
 
     def build_json_dict(self, data, nested_data, extended_data):
         clip_path = nested_data['clip_path'] if 'clip_path' in nested_data else None
-        
+
         extended_data.append({
             self.vid_data_key: data[self.vid_data_key],
             'frame_index': nested_data['frame_index'],
             'prompt': nested_data['prompt'],
             'clip_path': clip_path
         })
-        
+
     def load_from_json(self, path, json_data):
         try:
             with open(path) as jpath:
@@ -190,12 +194,12 @@ class VideoBLIPDataset(Dataset):
             traceback.print_exc()
             self.train_data = []
             print("Non-existant JSON path. Skipping.")
-            
+
     def validate_json(self, base_path, path):
         return os.path.exists(f"{base_path}/{path}")
 
     def get_frame_buckets(self, vr):
-        _, h, w = vr[0].shape        
+        _, h, w = vr[0].shape
         width, height = sensible_buckets(self.width, self.height, h, w)
         resize = T.transforms.Resize((height, width), antialias=True)
 
@@ -207,7 +211,7 @@ class VideoBLIPDataset(Dataset):
         prompt = vid_data['prompt']
         # If we are training on individual clips.
         if 'clip_path' in self.train_data[index] and \
-            self.train_data[index]['clip_path'] is not None:
+                self.train_data[index]['clip_path'] is not None:
             clip_path = vid_data['clip_path']
         else:
             clip_path = vid_data[self.vid_data_key]
@@ -223,32 +227,32 @@ class VideoBLIPDataset(Dataset):
             "text_prompt": prompt,
             'dataset': self.__getname__(),
         }
-        mask = get_moved_area_mask(video.permute([0,2,3,1]).numpy())
+        mask = get_moved_area_mask(video.permute([0, 2, 3, 1]).numpy())
         example['mask'] = mask
-        example['motion'] = calculate_motion_score(video.permute([0,2,3,1]).numpy())
+        example['motion'] = calculate_motion_score(video.permute([0, 2, 3, 1]).numpy())
         return example
-        
 
     @staticmethod
-    def __getname__(): return 'video_blip'
+    def __getname__():
+        return 'video_blip'
 
     def __len__(self):
         if self.train_data is not None:
             return len(self.train_data)
-        else: 
+        else:
             return 0
 
     def __getitem__(self, index):
         example = self.train_data_batch(index)
         if example['motion'] < self.motion_threshold:
-            return self.__getitem__(random.randint(0, len(self)-1))
+            return self.__getitem__(random.randint(0, len(self) - 1))
         return example
 
 
 class SingleVideoDataset(Dataset):
     def __init__(
-        self,
-            tokenizer = None,
+            self,
+            tokenizer=None,
             width: int = 256,
             height: int = 256,
             n_sample_frames: int = 4,
@@ -273,6 +277,7 @@ class SingleVideoDataset(Dataset):
 
         self.width = width
         self.height = height
+
     def create_video_chunks(self):
         # Create a list of frames separated by sample frames
         # [(1,2,3), (4,5,6), ...]
@@ -303,23 +308,23 @@ class SingleVideoDataset(Dataset):
         return video
 
     def get_frame_buckets(self, vr):
-        _, h, w = vr[0].shape        
+        _, h, w = vr[0].shape
         width, height = sensible_buckets(self.width, self.height, h, w)
         resize = T.transforms.Resize((height, width), antialias=True)
 
         return resize
-    
+
     def process_video_wrapper(self, vid_path):
         video, vr = process_video(
-                vid_path,
-                self.use_bucketing,
-                self.width, 
-                self.height, 
-                self.get_frame_buckets, 
-                self.get_frame_batch
-            )
-        
-        return video, vr 
+            vid_path,
+            self.use_bucketing,
+            self.width,
+            self.height,
+            self.get_frame_buckets,
+            self.get_frame_batch
+        )
+
+        return video, vr
 
     def single_video_batch(self, index):
         train_data = self.single_video_path
@@ -334,12 +339,13 @@ class SingleVideoDataset(Dataset):
             return video, prompt, prompt_ids
         else:
             raise ValueError(f"Single video is not a video type. Types: {self.vid_types}")
-    
+
     @staticmethod
-    def __getname__(): return 'single_video'
+    def __getname__():
+        return 'single_video'
 
     def __len__(self):
-        
+
         return len(self.create_video_chunks())
 
     def __getitem__(self, index):
@@ -354,27 +360,28 @@ class SingleVideoDataset(Dataset):
         }
 
         return example
-    
+
+
 class ImageDataset(Dataset):
-    
+
     def __init__(
-        self,
-        tokenizer = None,
-        width: int = 256,
-        height: int = 256,
-        base_width: int = 256,
-        base_height: int = 256,
-        use_caption:     bool = False,
-        image_dir: str = '',
-        single_img_prompt: str = '',
-        use_bucketing: bool = False,
-        fallback_prompt: str = '',
-        **kwargs
+            self,
+            tokenizer=None,
+            width: int = 256,
+            height: int = 256,
+            base_width: int = 256,
+            base_height: int = 256,
+            use_caption: bool = False,
+            image_dir: str = '',
+            single_img_prompt: str = '',
+            use_bucketing: bool = False,
+            fallback_prompt: str = '',
+            **kwargs
     ):
         self.tokenizer = tokenizer
         self.img_types = (".png", ".jpg", ".jpeg", '.bmp')
         self.use_bucketing = use_bucketing
-        #self.image_dir = self.get_images_list(image_dir)
+        # self.image_dir = self.get_images_list(image_dir)
         self.image_dir_path = image_dir
         self.image_dir = json.load(open(kwargs['image_json']))
         self.fallback_prompt = fallback_prompt
@@ -390,7 +397,7 @@ class ImageDataset(Dataset):
             imgs = [x for x in os.listdir(image_dir) if x.endswith(self.img_types)]
             full_img_dir = []
 
-            for img in imgs: 
+            for img in imgs:
                 full_img_dir.append(f"{image_dir}/{img}")
 
             return sorted(full_img_dir)
@@ -412,18 +419,19 @@ class ImageDataset(Dataset):
         if self.use_bucketing:
             _, h, w = img.shape
             width, height = sensible_buckets(width, height, w, h)
-              
+
         resize = T.transforms.Resize((height, width), antialias=True)
 
-        img = resize(img) 
+        img = resize(img)
         img = repeat(img, 'c h w -> f c h w', f=1)
         prompt_ids = get_prompt_ids(prompt, self.tokenizer)
 
         return img, prompt, prompt_ids
 
     @staticmethod
-    def __getname__(): return 'image'
-    
+    def __getname__():
+        return 'image'
+
     def __len__(self):
         # Image directory
         return len(self.image_dir)
@@ -434,24 +442,25 @@ class ImageDataset(Dataset):
             "pixel_values": normalize_input(img),
             "frames": img,
             "prompt_ids": prompt_ids,
-            "text_prompt": prompt, 
+            "text_prompt": prompt,
             'dataset': self.__getname__()
         }
 
         return example
 
+
 class VideoFolderDataset(Dataset):
     def __init__(
-        self,
-        tokenizer=None,
-        width: int = 256,
-        height: int = 256,
-        n_sample_frames: int = 16,
-        fps: int = 8,
-        path: str = "./data",
-        fallback_prompt: str = "",
-        use_bucketing: bool = False,
-        **kwargs
+            self,
+            tokenizer=None,
+            width: int = 256,
+            height: int = 256,
+            n_sample_frames: int = 16,
+            fps: int = 8,
+            path: str = "./data",
+            fallback_prompt: str = "",
+            use_bucketing: bool = False,
+            **kwargs
     ):
         self.tokenizer = tokenizer
         self.use_bucketing = use_bucketing
@@ -467,7 +476,7 @@ class VideoFolderDataset(Dataset):
         self.fps = fps
 
     def get_frame_buckets(self, vr):
-        _, h, w = vr[0].shape        
+        _, h, w = vr[0].shape
         width, height = sensible_buckets(self.width, self.height, h, w)
         resize = T.transforms.Resize((height, width), antialias=True)
 
@@ -476,10 +485,10 @@ class VideoFolderDataset(Dataset):
     def get_frame_batch(self, vr, resize=None):
         n_sample_frames = self.n_sample_frames
         native_fps = vr.get_avg_fps()
-        
+
         every_nth_frame = max(1, round(native_fps / self.fps))
         every_nth_frame = min(len(vr), every_nth_frame)
-        
+
         effective_length = len(vr) // every_nth_frame
         if effective_length < n_sample_frames:
             n_sample_frames = effective_length
@@ -492,31 +501,54 @@ class VideoFolderDataset(Dataset):
         video = rearrange(video, "f h w c -> f c h w")
 
         if resize is not None: video = resize(video)
-        return video, vr
-        
+        return video, vr, idxs
+
+    def process_video(self, vid_path, use_bucketing, w, h, get_frame_buckets, get_frame_batch):
+        if use_bucketing:
+            vr = decord.VideoReader(vid_path)
+            resize = get_frame_buckets(vr)
+            video, idxs = get_frame_batch(vr, resize=resize)
+
+        else:
+            vr = decord.VideoReader(vid_path)
+            video, idxs = get_frame_batch(vr)
+
+        return video, vr, idxs
+
     def process_video_wrapper(self, vid_path):
-        video, vr = process_video(
-                vid_path,
-                self.use_bucketing,
-                self.width, 
-                self.height, 
-                self.get_frame_buckets, 
-                self.get_frame_batch
-            )
-        return video, vr
-    
+        video, vr, idxs = self.process_video(
+            vid_path,
+            self.use_bucketing,
+            self.width,
+            self.height,
+            self.get_frame_buckets,
+            self.get_frame_batch
+        )
+        return video, vr, idxs
+
     @staticmethod
-    def __getname__(): return 'folder'
+    def __getname__():
+        return 'folder'
 
     def __len__(self):
         return len(self.video_files)
 
     def __getitem__(self, index):
         try:
-            video, _ = self.process_video_wrapper(self.video_files[index])
+            video, _, idxs = self.process_video_wrapper(self.video_files[index])
         except Exception as err:
             print("read video error", self.video_files[index])
-            video, _ = self.process_video_wrapper(self.video_files[index+1])
+            video, _, idxs = self.process_video_wrapper(self.video_files[index + 1])
+
+        # Get signal data
+        signal_output = []
+        if os.path.exists(self.video_files[index].replace("locomotion_video_whole_mp4", "locomotion_signal_video")):
+            signal_path = self.video_files[index].replace("locomotion_video_whole_mp4", "locomotion_signal_video")
+            for frame_idx in range(idxs):
+                channels = torch.load(signal_path.replace("result.mp4", "channels_" + str(frame_idx) + ".pt"),
+                                      weights_only=True)
+                sim_output = torch.stack(channels)
+                signal_output.append(sim_output)
 
         if os.path.exists(self.video_files[index].replace(".mp4", ".txt")):
             with open(self.video_files[index].replace(".mp4", ".txt"), "r") as f:
@@ -527,23 +559,27 @@ class VideoFolderDataset(Dataset):
 
         prompt_ids = get_prompt_ids(prompt, self.tokenizer)
 
+        assert signal_output
+
         return {"pixel_values": normalize_input(video[0]), "frames": video[0],
-                "prompt_ids": prompt_ids, "text_prompt": prompt, 'dataset': self.__getname__()}
+                "prompt_ids": prompt_ids, "text_prompt": prompt, "signals": signal_output,
+                'dataset': self.__getname__()}
+
 
 class VideoJsonDataset(Dataset):
     def __init__(
-        self,
-        tokenizer=None,
-        width: int = 256,
-        height: int = 256,
-        n_sample_frames: int = 16,
-        fps: int = 8,
-        video_dir: str = "./data",
-        video_json: str = "",
-        fallback_prompt: str = "",
-        use_bucketing: bool = False,
-        motion_threshold = 50,
-        **kwargs
+            self,
+            tokenizer=None,
+            width: int = 256,
+            height: int = 256,
+            n_sample_frames: int = 16,
+            fps: int = 8,
+            video_dir: str = "./data",
+            video_json: str = "",
+            fallback_prompt: str = "",
+            use_bucketing: bool = False,
+            motion_threshold=50,
+            **kwargs
     ):
         self.tokenizer = tokenizer
         self.use_bucketing = use_bucketing
@@ -559,22 +595,21 @@ class VideoJsonDataset(Dataset):
         self.fps = fps
         self.motion_threshold = motion_threshold
         self.transform = T.Compose([
-            #T.RandomResizedCrop(size=(height, width), scale=(0.8, 1.0), ratio=(width/height, width/height), antialias=False),
+            # T.RandomResizedCrop(size=(height, width), scale=(0.8, 1.0), ratio=(width/height, width/height), antialias=False),
             T.Resize(min(height, width), antialias=False),
             T.CenterCrop([height, width])
         ])
 
-
     def get_frame_buckets(self, vr):
-        _, h, w = vr[0].shape        
+        _, h, w = vr[0].shape
         width, height = sensible_buckets(self.width, self.height, h, w)
         resize = T.transforms.Resize((height, width), antialias=True)
 
         return resize
 
-       
     @staticmethod
-    def __getname__(): return 'video_json'
+    def __getname__():
+        return 'video_json'
 
     def __len__(self):
         return len(self.video_files)
@@ -592,23 +627,24 @@ class VideoJsonDataset(Dataset):
             video = get_frame_batch(self.n_sample_frames, self.fps, vr, self.transform)
         except Exception as err:
             print("read video error", err, video_path)
-            return self.__getitem__(index+1)
+            return self.__getitem__(index + 1)
         prompt_ids = get_prompt_ids(prompt, self.tokenizer)
 
         example = {
-            "pixel_values": normalize_input(video), 
-            "prompt_ids": prompt_ids, 
-            "text_prompt": prompt, 
+            "pixel_values": normalize_input(video),
+            "prompt_ids": prompt_ids,
+            "text_prompt": prompt,
             'dataset': self.__getname__()
         }
-        example['mask'] = get_moved_area_mask(video.permute([0,2,3,1]).numpy())
-        example['motion'] = calculate_motion_score(video.permute([0,2,3,1]).numpy())
+        example['mask'] = get_moved_area_mask(video.permute([0, 2, 3, 1]).numpy())
+        example['motion'] = calculate_motion_score(video.permute([0, 2, 3, 1]).numpy())
         if example['motion'] < self.motion_threshold:
-            return self.__getitem__(random.randint(0, len(self)-1))
+            return self.__getitem__(random.randint(0, len(self) - 1))
         return example
 
+
 class CachedDataset(Dataset):
-    def __init__(self,cache_dir: str = ''):
+    def __init__(self, cache_dir: str = ''):
         self.cache_dir = cache_dir
         self.cached_data_list = self.get_files_list()
 
@@ -623,6 +659,7 @@ class CachedDataset(Dataset):
         cached_latent = torch.load(self.cached_data_list[index], map_location='cuda:0')
         return cached_latent
 
+
 def get_train_dataset(dataset_types, train_data, tokenizer):
     train_datasets = []
     dataset_cls = [VideoJsonDataset, SingleVideoDataset, ImageDataset, VideoFolderDataset, VideoBLIPDataset]
@@ -635,6 +672,7 @@ def get_train_dataset(dataset_types, train_data, tokenizer):
         else:
             raise ValueError(f"Dataset type not found: {dataset} not in {dataset_map.keys()}")
     return train_datasets
+
 
 def extend_datasets(datasets, dataset_items, extend=False):
     biggest_data_len = max(x.__len__() for x in datasets)
