@@ -235,7 +235,8 @@ class VideoBLIPDataset(Dataset):
     def train_data_batch(self, index):
         vid_data = self.train_data[index]
         # Get video prompt
-        prompt = vid_data['prompt']
+        # prompt = vid_data['prompt']
+
         # If we are training on individual clips.
         if 'clip_path' in self.train_data[index] and \
                 self.train_data[index]['clip_path'] is not None:
@@ -248,8 +249,9 @@ class VideoBLIPDataset(Dataset):
         vr = decord.VideoReader(clip_path)
 
         video, signal = get_frame_signal_batch(vid_data[self.sig_data_key], self.n_sample_frames, self.fps, vr, self.transform)
-        prompt_ids = get_prompt_ids(prompt, self.tokenizer)
-
+        # prompt_ids = get_prompt_ids(prompt, self.tokenizer)
+        prompt_ids = None
+        prompt = None
         example = {
             "pixel_values": normalize_input(video),
             "signal_values": signal,

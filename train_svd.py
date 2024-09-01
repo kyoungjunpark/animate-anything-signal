@@ -426,11 +426,11 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
 
     signal_embeddings = signal_embeddings.reshape(signal_embeddings.size(0), 1, -1)
 
-    image_resize_encoder = ImageResizeEncoder(input_dim=image_embeddings.size(-1), output_dim=512).to(device)
-    signal_resize_encoder = SignalResizeEncoder(input_dim=signal_embeddings.size(-1), output_dim=512).to(device)
+    image_resize_encoder = ImageResizeEncoder(input_dim=image_embeddings.size(-1), output_dim=512).half().to(device)
+    signal_resize_encoder = SignalResizeEncoder(input_dim=signal_embeddings.size(-1), output_dim=512).half().to(device)
 
-    image_embeddings = image_resize_encoder(image_embeddings)
-    signal_embeddings = signal_resize_encoder(signal_embeddings)
+    image_embeddings = image_resize_encoder(image_embeddings.half())
+    signal_embeddings = signal_resize_encoder(signal_embeddings.half())
 
     encoder_hidden_states = torch.cat((image_embeddings, signal_embeddings), dim=2)
 

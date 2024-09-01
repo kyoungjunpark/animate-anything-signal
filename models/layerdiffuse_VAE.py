@@ -73,7 +73,7 @@ class SignalResizeEncoder(torch.nn.Module):
 
 
 class LatentSignalEncoder(torch.nn.Module):
-    def __init__(self, input_dim=512, hidden_dims=[1024, 512, 256, 128, 64], output_dim=32, dropout_prob=0.3):
+    def __init__(self, input_dim=512, hidden_dims=[512, 256, 128, 64], output_dim=32, dropout_prob=0.3):
         super(LatentSignalEncoder, self).__init__()
 
         # Create a list of layers
@@ -82,13 +82,13 @@ class LatentSignalEncoder(torch.nn.Module):
 
         # Add hidden layers
         for hidden_dim in hidden_dims:
-            layers.append(nn.Linear(current_dim, hidden_dim))  # Linear layer
+            layers.append(nn.Linear(current_dim, hidden_dim, device='cuda'))  # Linear layer
             layers.append(nn.ReLU())  # ReLU activation function
             # layers.append(nn.Dropout(p=dropout_prob))  # Dropout layer
             current_dim = hidden_dim
 
         # Add the final output layer
-        layers.append(nn.Linear(current_dim, output_dim))
+        layers.append(nn.Linear(current_dim, output_dim, device='cuda'))
 
         # Use nn.Sequential to combine the layers into a single module
         self.encoder = nn.Sequential(*layers)
