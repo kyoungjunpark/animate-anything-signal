@@ -42,6 +42,36 @@ class LatentTransparencyOffsetEncoder(torch.nn.Module):
         return self.blocks(x)
 
 
+class ImageResizeEncoder(torch.nn.Module):
+    def __init__(self, input_dim, output_dim, hidden_dim=1024):
+        super(ImageResizeEncoder, self).__init__()
+        self.blocks = torch.nn.Sequential(
+            nn.Linear(input_dim, hidden_dim, device='cuda'),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim, device='cuda'),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, output_dim, device='cuda'),
+        )
+
+    def __call__(self, x):
+        return self.blocks(x)
+
+
+class SignalResizeEncoder(torch.nn.Module):
+    def __init__(self, input_dim, output_dim, hidden_dim=1024):
+        super(SignalResizeEncoder, self).__init__()
+        self.blocks = torch.nn.Sequential(
+            nn.Linear(input_dim, hidden_dim, device='cuda'),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim, device='cuda'),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, output_dim, device='cuda'),
+        )
+
+    def __call__(self, x):
+        return self.blocks(x)
+
+
 class LatentSignalEncoder(torch.nn.Module):
     def __init__(self, input_dim=512, hidden_dims=[1024, 512, 256, 128, 64], output_dim=32, dropout_prob=0.3):
         super(LatentSignalEncoder, self).__init__()
