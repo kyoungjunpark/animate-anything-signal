@@ -6,6 +6,7 @@ from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.unet_2d_blocks import UNetMidBlock2D, get_down_block, get_up_block
 
+
 # referenced from https://github.com/layerdiffusion/sd-forge-layerdiffuse/blob/main/lib_layerdiffusion/models.py
 
 def zero_module(module):
@@ -41,25 +42,52 @@ class LatentTransparencyOffsetEncoder(torch.nn.Module):
         return self.blocks(x)
 
 
+class LatentSignalEncoder(torch.nn.Module):
+    def __init__(self, input_dim=512, hidden_dims=[1024, 512, 256, 128, 64], output_dim=32, dropout_prob=0.3):
+        super(LatentSignalEncoder, self).__init__()
+
+        # Create a list of layers
+        layers = []
+        current_dim = input_dim
+
+        # Add hidden layers
+        for hidden_dim in hidden_dims:
+            layers.append(nn.Linear(current_dim, hidden_dim))  # Linear layer
+            layers.append(nn.ReLU())  # ReLU activation function
+            # layers.append(nn.Dropout(p=dropout_prob))  # Dropout layer
+            current_dim = hidden_dim
+
+        # Add the final output layer
+        layers.append(nn.Linear(current_dim, output_dim))
+
+        # Use nn.Sequential to combine the layers into a single module
+        self.encoder = nn.Sequential(*layers)
+
+    def forward(self, x):
+        # x shape: (batch_size, 25, 512)
+        x = self.encoder(x)  # Pass input through the multi-layer encoder
+        return x
+
+
 class UNet384(ModelMixin, ConfigMixin):
     @register_to_config
     def __init__(
-        self,
-        in_channels: int = 3,
-        out_channels: int = 4,
-        down_block_types: Tuple[str] = ("DownBlock2D", "DownBlock2D", "DownBlock2D", "AttnDownBlock2D"),
-        up_block_types: Tuple[str] = ("AttnUpBlock2D", "UpBlock2D", "UpBlock2D", "UpBlock2D"),
-        block_out_channels: Tuple[int] = (32, 64, 128, 256),
-        layers_per_block: int = 2,
-        mid_block_scale_factor: float = 1,
-        downsample_padding: int = 1,
-        downsample_type: str = "conv",
-        upsample_type: str = "conv",
-        dropout: float = 0.0,
-        act_fn: str = "silu",
-        attention_head_dim: Optional[int] = 8,
-        norm_num_groups: int = 4,
-        norm_eps: float = 1e-5,
+            self,
+            in_channels: int = 3,
+            out_channels: int = 4,
+            down_block_types: Tuple[str] = ("DownBlock2D", "DownBlock2D", "DownBlock2D", "AttnDownBlock2D"),
+            up_block_types: Tuple[str] = ("AttnUpBlock2D", "UpBlock2D", "UpBlock2D", "UpBlock2D"),
+            block_out_channels: Tuple[int] = (32, 64, 128, 256),
+            layers_per_block: int = 2,
+            mid_block_scale_factor: float = 1,
+            downsample_padding: int = 1,
+            downsample_type: str = "conv",
+            upsample_type: str = "conv",
+            dropout: float = 0.0,
+            act_fn: str = "silu",
+            attention_head_dim: Optional[int] = 8,
+            norm_num_groups: int = 4,
+            norm_eps: float = 1e-5,
     ):
         super().__init__()
 
@@ -164,7 +192,7 @@ class UNet384(ModelMixin, ConfigMixin):
         sample = self.mid_block(sample, emb)
 
         for upsample_block in self.up_blocks:
-            res_samples = down_block_res_samples[-len(upsample_block.resnets) :]
+            res_samples = down_block_res_samples[-len(upsample_block.resnets):]
             down_block_res_samples = down_block_res_samples[: -len(upsample_block.resnets)]
             sample = upsample_block(sample, res_samples, emb)
 
@@ -172,6 +200,6 @@ class UNet384(ModelMixin, ConfigMixin):
         sample = self.conv_act(sample)
         sample = self.conv_out(sample)
         return sample
-    
+
     def __call__(self, x, latent):
         return self.forward(x, latent)

@@ -1,4 +1,4 @@
-accelerate==0.21.0
+accelerate
 torch==2.0.0
 torchvision
 diffusers==0.24.0
@@ -16,3 +16,5 @@ rotary_embedding_torch
 imageio[ffmpeg]
 gradio
 httpx[socks]
+numpy==1.26.4
+deepspeed

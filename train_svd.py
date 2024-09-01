@@ -41,6 +41,8 @@ from diffusers.pipelines.stable_video_diffusion.pipeline_stable_video_diffusion 
 
 from transformers import CLIPTextModel, CLIPTokenizer, CLIPVisionModel, CLIPImageProcessor, CLIPTextConfig
 from transformers.models.clip.modeling_clip import CLIPEncoder
+
+from models.layerdiffuse_VAE import LatentSignalEncoder
 from utils.dataset import get_train_dataset, extend_datasets
 from einops import rearrange, repeat
 import imageio
@@ -349,6 +351,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     P_mean=0.7, P_std=1.6):
     pipeline.vae.eval()
     pipeline.image_encoder.eval()
+
     device = unet.device
     dtype = pipeline.vae.dtype
     vae = pipeline.vae
@@ -381,6 +384,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
         condition_latent = repeat(image_latent, 'b c h w->b f c h w',f=num_frames)
 
     pipeline.image_encoder.to(device, dtype=dtype)
+
     images = _resize_with_antialiasing(pixel_values[:,0], (224, 224)).to(dtype)
     images = (images + 1.0) / 2.0 # [-1, 1] -> [0, 1]
     images = pipeline.feature_extractor(
@@ -393,6 +397,14 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     ).pixel_values 
     image_embeddings = pipeline._encode_image(images, device, 1, False)
 
+    # Signal embedding
+    signal_encoder = LatentSignalEncoder().to(device)
+
+    signal_values = batch['signal_values']  # [FPS, 512]
+    signal_values = torch.nan_to_num(signal_values, nan=0.0)
+    signal_embeddings = signal_encoder(signal_values)
+
+    print(image_embeddings.size(), signal_embeddings.size())
     encoder_hidden_states = image_embeddings
     uncond_hidden_states = torch.zeros_like(image_embeddings)
     

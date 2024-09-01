@@ -123,12 +123,12 @@ def get_frame_signal_batch(signal_path, max_frames, sample_fps, vr, transform):
     video = rearrange(frames, "f h w c -> f c h w")
     video = transform(video)
     channels = []
-
-    for frame_idx in frame_range:
-        channel = torch.load(signal_path / ("channels_" + str(frame_idx) + ".pt"), weights_only=True)
+    for frame_idx in range(start, start + max_frames):
+        channel = torch.load(signal_path.replace("channels_0.pt", "channels_" + str(frame_idx) + ".pt"), weights_only=True)
+        channel = torch.real(torch.stack(channel))
         channels.append(channel)
     channels = torch.stack(channels)
-    print(channels.size())
+    channels *= 10**6
     return video, channels
 
 
@@ -252,7 +252,7 @@ class VideoBLIPDataset(Dataset):
 
         example = {
             "pixel_values": normalize_input(video),
-            "signal_values": None,
+            "signal_values": signal,
             "prompt_ids": prompt_ids,
             "text_prompt": prompt,
             'dataset': self.__getname__(),
