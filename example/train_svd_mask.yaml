@@ -18,9 +18,9 @@ output_dir: "./output/svd"
 # 'single_video': A single video file.mp4 and text prompt
 dataset_types: 
   #- 'single_video'
-  #- 'folder'
+  - 'folder'
   #- 'image'
-  - 'video_blip'
+  # - 'video_blip'
   #- 'video_json'
 
 # Adds offset noise to training. See https://www.crosslabs.org/blog/diffusion-with-offset-noise
@@ -145,7 +145,7 @@ train_data:
   
   # 'folder'
   #path: "/data2/webvid/data/videos/004151_004200"
-  path: "/data/datasets/msvd/videos_mp4"
+  path: "/home/aiscuser/locomotion_video_whole_mp4/"
 
   # 'json'
   json_path: '/webvid/animation1.json'

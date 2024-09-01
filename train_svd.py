@@ -380,7 +380,6 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     else:
         condition_latent = repeat(image_latent, 'b c h w->b f c h w',f=num_frames)
 
-
     pipeline.image_encoder.to(device, dtype=dtype)
     images = _resize_with_antialiasing(pixel_values[:,0], (224, 224)).to(dtype)
     images = (images + 1.0) / 2.0 # [-1, 1] -> [0, 1]
@@ -619,7 +618,6 @@ def main(
     # Train!
     total_batch_size = train_batch_size * accelerator.num_processes * gradient_accumulation_steps
     num_train_epochs = math.ceil(max_train_steps * gradient_accumulation_steps / len(train_dataloader) / accelerator.num_processes)
-
 
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")

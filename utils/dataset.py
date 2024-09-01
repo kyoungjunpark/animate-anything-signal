@@ -109,6 +109,29 @@ def get_frame_batch(max_frames, sample_fps, vr, transform):
     return video
 
 
+def get_frame_signal_batch(signal_path, max_frames, sample_fps, vr, transform):
+    native_fps = vr.get_avg_fps()
+    max_range = len(vr)
+    frame_step = max(1, round(native_fps / sample_fps))
+    frame_range = range(0, max_range, frame_step)
+    if len(frame_range) < max_frames:
+        frame_range = np.linspace(0, max_range - 1, max_frames).astype(int)
+    # start = random.randint(0, len(frame_range) - max_frames)
+    start = len(frame_range) - max_frames
+    frame_range_indices = list(frame_range)[start:start + max_frames]
+    frames = vr.get_batch(frame_range_indices)
+    video = rearrange(frames, "f h w c -> f c h w")
+    video = transform(video)
+    channels = []
+
+    for frame_idx in frame_range:
+        channel = torch.load(signal_path / ("channels_" + str(frame_idx) + ".pt"), weights_only=True)
+        channels.append(channel)
+    channels = torch.stack(channels)
+    print(channels.size())
+    return video, channels
+
+
 def process_video(vid_path, use_bucketing, w, h, get_frame_buckets, get_frame_batch):
     if use_bucketing:
         vr = decord.VideoReader(vid_path)
@@ -134,6 +157,7 @@ class VideoBLIPDataset(Dataset):
             json_path: str = "",
             json_data=None,
             vid_data_key: str = "video_path",
+            sig_data_key: str = "signal_path",
             preprocessed: bool = False,
             use_bucketing: bool = False,
             motion_threshold=50,
@@ -145,6 +169,8 @@ class VideoBLIPDataset(Dataset):
         self.preprocessed = preprocessed
 
         self.vid_data_key = vid_data_key
+        self.sig_data_key = sig_data_key
+
         self.train_data = self.load_from_json(json_path, json_data)
         self.motion_threshold = motion_threshold
         self.width = width
@@ -176,6 +202,7 @@ class VideoBLIPDataset(Dataset):
 
         extended_data.append({
             self.vid_data_key: data[self.vid_data_key],
+            self.sig_data_key: data[self.sig_data_key],
             'frame_index': nested_data['frame_index'],
             'prompt': nested_data['prompt'],
             'clip_path': clip_path
@@ -219,10 +246,13 @@ class VideoBLIPDataset(Dataset):
             self.sample_start_idx = vid_data['frame_index']
 
         vr = decord.VideoReader(clip_path)
-        video = get_frame_batch(self.n_sample_frames, self.fps, vr, self.transform)
+
+        video, signal = get_frame_signal_batch(vid_data[self.sig_data_key], self.n_sample_frames, self.fps, vr, self.transform)
         prompt_ids = get_prompt_ids(prompt, self.tokenizer)
+
         example = {
             "pixel_values": normalize_input(video),
+            "signal_values": None,
             "prompt_ids": prompt_ids,
             "text_prompt": prompt,
             'dataset': self.__getname__(),
@@ -467,7 +497,15 @@ class VideoFolderDataset(Dataset):
 
         self.fallback_prompt = fallback_prompt
 
-        self.video_files = glob(f"{path}/*.mp4")
+        # self.video_files = glob(f"{path}/*.mp4")
+        self.video_files = []
+
+        for video_path in glob(os.path.join(self.video_directory, '**', '*.mp4'), recursive=True):
+            signal_path = video_path.replace("locomotion_video_whole_mp4", "locomotion_signal_video")
+            signal_path = signal_path.replace("result.mp4", "channels_0.pt")
+            if os.path.exists(signal_path):
+                self.video_files.append(video_path)
+        # Check signal + video
 
         self.width = width
         self.height = height
