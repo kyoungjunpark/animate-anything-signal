@@ -25,7 +25,7 @@ from PIL import Image
 
 from accelerate import Accelerator
 from accelerate.logging import get_logger
-from accelerate.utils import set_seed
+from accelerate.utils import set_seed, ProjectConfiguration
 
 from diffusers.models import AutoencoderKL, UNetSpatioTemporalConditionModel
 from diffusers import DPMSolverMultistepScheduler, DDPMScheduler, EulerDiscreteScheduler
@@ -46,6 +46,7 @@ from models.layerdiffuse_VAE import LatentSignalEncoder, ImageResizeEncoder, Sig
 from utils.dataset import get_train_dataset, extend_datasets
 from einops import rearrange, repeat
 import imageio
+import wandb
 
 from models.pipeline import MaskStableVideoDiffusionPipeline
 from utils.common import read_mask, generate_random_mask, slerp, calculate_motion_score, \
@@ -56,6 +57,7 @@ already_printed_trainables = False
 
 logger = get_logger(__name__, log_level="INFO")
 
+wandb.init(project="signal_svd")
 
 def create_logging(logging, logger, accelerator):
     logging.basicConfig(
@@ -523,7 +525,8 @@ def main(
         gradient_accumulation_steps=gradient_accumulation_steps,
         mixed_precision=mixed_precision,
         log_with=logger_type,
-        project_dir=output_dir
+        project_dir=output_dir,
+        # project_config=config,
     )
 
     # Make one log on every process with the configuration for debugging.
@@ -739,6 +742,7 @@ def main(
                             out_file = f"{output_dir}/samples/{save_filename}.gif"
                             eval(pipeline, vae_processor, validation_data, out_file, global_step)
                             logger.info(f"Saved a new sample to {out_file}")
+                        wandb.log({"Generated GIF": wandb.Image(out_file, caption=out_file)})
 
             logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
             accelerator.log({"training_loss": loss.detach().item()}, step=step)
@@ -832,6 +836,9 @@ def eval(pipeline, vae_processor, validation_data, out_file, index, forward_t=25
         fps = validation_data.get('fps', 8)
         imageio.mimwrite(out_file, video_frames, duration=int(1000 / fps), loop=0)
         imageio.mimwrite(out_file.replace('.gif', '.mp4'), video_frames, fps=fps)
+        wandb.log({"Generated mp4": wandb.Video(out_file.replace('.gif', '.mp4'),
+                                                caption=out_file.replace('.gif', '.mp4'), fps=fps, format="mp4")})
+
     return 0
 
 
