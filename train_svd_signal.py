@@ -417,7 +417,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
         do_rescale=False,
         return_tensors="pt",
     ).pixel_values
-    image_embeddings = pipeline._encode_image(images, device, 1, False)
+    # image_embeddings = pipeline._encode_image(images, device, 1, False)
 
     # Signal embedding
     signal_encoder = LatentSignalEncoder().to(device)
@@ -428,14 +428,16 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
 
     signal_embeddings = signal_embeddings.reshape(signal_embeddings.size(0), 1, -1)
 
-    image_resize_encoder = ImageResizeEncoder(input_dim=image_embeddings.size(-1), output_dim=512).half().to(device)
-    signal_resize_encoder = SignalResizeEncoder(input_dim=signal_embeddings.size(-1), output_dim=512).half().to(device)
+    # image_resize_encoder = ImageResizeEncoder(input_dim=image_embeddings.size(-1), output_dim=512).half().to(device)
+    signal_resize_encoder = SignalResizeEncoder(input_dim=signal_embeddings.size(-1), output_dim=1024).half().to(device)
 
-    image_embeddings = image_resize_encoder(image_embeddings.half())
+    # image_embeddings = image_resize_encoder(image_embeddings.half())
     signal_embeddings = signal_resize_encoder(signal_embeddings.half())
 
-    encoder_hidden_states = torch.cat((image_embeddings, signal_embeddings), dim=2)
+    # Change cross attention (use condition how motion) for signal sensing (see text embedding from animate-anything)
 
+    # encoder_hidden_states = torch.cat((image_embeddings, signal_embeddings), dim=2)
+    encoder_hidden_states = signal_encoder
     uncond_hidden_states = torch.zeros_like(encoder_hidden_states)
 
     if random.random() < 0.15:
@@ -453,6 +455,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     noisy_latents = latents + torch.randn_like(latents) * sigma
     input_latents = torch.cat([c_in * noisy_latents,
                                condition_latent / vae.config.scaling_factor], dim=2)
+    print("input_latents: ", input_latents.size())
     if motion_mask:
         input_latents = torch.cat([mask, input_latents], dim=2)
 
@@ -742,11 +745,10 @@ def main(
                             out_file = f"{output_dir}/samples/{save_filename}.gif"
                             eval(pipeline, vae_processor, validation_data, out_file, global_step)
                             logger.info(f"Saved a new sample to {out_file}")
-                        wandb.log({"Generated GIF": wandb.Image(out_file, caption=out_file)})
 
             logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
             accelerator.log({"training_loss": loss.detach().item()}, step=step)
-            progress_bar.set_postfix(**logs)
+            progress_bar.set_postfix(**logs)미안해
 
             if global_step >= max_train_steps:
                 break

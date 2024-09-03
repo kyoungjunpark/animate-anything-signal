@@ -18,3 +18,5 @@ gradio
 httpx[socks]
 numpy==1.26.4
 deepspeed
+azure-core
+isodate

@@ -123,12 +123,9 @@ def get_frame_signal_batch(signal_path, max_frames, sample_fps, vr, transform):
     video = rearrange(frames, "f h w c -> f c h w")
     video = transform(video)
     channels = []
-    for frame_idx in range(start, start + max_frames):
-        channel = torch.load(signal_path.replace("channels_0.pt", "channels_" + str(frame_idx) + ".pt"), weights_only=True)
-        channel = torch.real(torch.stack(channel))
-        channels.append(channel)
-    channels = torch.stack(channels)
-    channels *= 10**6
+    channels = torch.load(signal_path)
+    partial_channels = channels[frame_range_indices, :]
+    print(channels.size(), partial_channels.size())
     return video, channels
 
 
