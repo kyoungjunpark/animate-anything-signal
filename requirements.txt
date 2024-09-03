@@ -1,7 +1,9 @@
 accelerate
-torch==2.0.0
+# torch==2.0.0
+torch
 torchvision
-diffusers==0.24.0
+# diffusers==0.24.0
+diffusers
 transformers==4.36.2
 einops
 decord
@@ -20,3 +22,5 @@ numpy==1.26.4
 deepspeed
 azure-core
 isodate
+wandb
+cffi

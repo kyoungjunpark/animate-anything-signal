@@ -120,13 +120,16 @@ def get_frame_signal_batch(signal_path, max_frames, sample_fps, vr, transform):
     start = len(frame_range) - max_frames
     frame_range_indices = list(frame_range)[start:start + max_frames]
     frames = vr.get_batch(frame_range_indices)
-    video = rearrange(frames, "f h w c -> f c h w")
+    video = rearrange(frames, "f h w  c -> f c h w")
     video = transform(video)
-    channels = []
-    channels = torch.load(signal_path)
+    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    channels = torch.load(signal_path, map_location="cuda:0", weights_only=True)
+
     partial_channels = channels[frame_range_indices, :]
-    print(channels.size(), partial_channels.size())
-    return video, channels
+
+    # partial_channels = np.array(0)
+    return video, partial_channels
 
 
 def process_video(vid_path, use_bucketing, w, h, get_frame_buckets, get_frame_batch):
@@ -232,8 +235,7 @@ class VideoBLIPDataset(Dataset):
     def train_data_batch(self, index):
         vid_data = self.train_data[index]
         # Get video prompt
-        # prompt = vid_data['prompt']
-
+        prompt = vid_data['prompt']
         # If we are training on individual clips.
         if 'clip_path' in self.train_data[index] and \
                 self.train_data[index]['clip_path'] is not None:
@@ -246,9 +248,12 @@ class VideoBLIPDataset(Dataset):
         vr = decord.VideoReader(clip_path)
 
         video, signal = get_frame_signal_batch(vid_data[self.sig_data_key], self.n_sample_frames, self.fps, vr, self.transform)
-        # prompt_ids = get_prompt_ids(prompt, self.tokenizer)
-        prompt_ids = None
-        prompt = None
+        # video = get_frame_batch(self.n_sample_frames, self.fps, vr, self.transform)
+
+        # prompt_ids = np.array(0)
+        # prompt = np.array(0)
+        prompt_ids = get_prompt_ids(prompt, self.tokenizer)
+
         example = {
             "pixel_values": normalize_input(video),
             "signal_values": signal,
@@ -256,9 +261,12 @@ class VideoBLIPDataset(Dataset):
             "text_prompt": prompt,
             'dataset': self.__getname__(),
         }
+        # mask = np.array(0)
         mask = get_moved_area_mask(video.permute([0, 2, 3, 1]).numpy())
         example['mask'] = mask
+        # example['motion'] = np.array(0)
         example['motion'] = calculate_motion_score(video.permute([0, 2, 3, 1]).numpy())
+
         return example
 
     @staticmethod
@@ -538,19 +546,7 @@ class VideoFolderDataset(Dataset):
         video = rearrange(video, "f h w c -> f c h w")
 
         if resize is not None: video = resize(video)
-        return video, vr, idxs
-
-    def process_video(self, vid_path, use_bucketing, w, h, get_frame_buckets, get_frame_batch):
-        if use_bucketing:
-            vr = decord.VideoReader(vid_path)
-            resize = get_frame_buckets(vr)
-            video, idxs = get_frame_batch(vr, resize=resize)
-
-        else:
-            vr = decord.VideoReader(vid_path)
-            video, idxs = get_frame_batch(vr)
-
-        return video, vr, idxs
+        return video, vr
 
     def process_video_wrapper(self, vid_path):
         video, vr, idxs = self.process_video(
@@ -693,11 +689,11 @@ class CachedDataset(Dataset):
         return len(self.cached_data_list)
 
     def __getitem__(self, index):
-        cached_latent = torch.load(self.cached_data_list[index], map_location='cuda:0')
+        cached_latent = torch.load(self.cached_data_list[index], map_location='cuda:0', weights_only=True)
         return cached_latent
 
 
-def get_train_dataset(dataset_types, train_data, tokenizer):
+def get_train_dataset(dataset_types, train_data):
     train_datasets = []
     dataset_cls = [VideoJsonDataset, SingleVideoDataset, ImageDataset, VideoFolderDataset, VideoBLIPDataset]
     dataset_map = {d.__getname__(): d for d in dataset_cls}
@@ -705,7 +701,7 @@ def get_train_dataset(dataset_types, train_data, tokenizer):
     # Loop through all available datasets, get the name, then add to list of data to process.
     for dataset in dataset_types:
         if dataset in dataset_map:
-            train_datasets.append(dataset_map[dataset](**train_data, tokenizer=tokenizer))
+            train_datasets.append(dataset_map[dataset](**train_data))
         else:
             raise ValueError(f"Dataset type not found: {dataset} not in {dataset_map.keys()}")
     return train_datasets
