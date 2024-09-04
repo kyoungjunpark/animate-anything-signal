@@ -691,12 +691,13 @@ def finetune_unet(accelerator, batch, use_offset_noise,
 
     # Encode text embeddings
     # token_ids = batch['prompt_ids']
-
-    signal_encoder = LatentSignalEncoder(output_dim=1024).to(latents.device)
-    signal_encoder2 = LatentSignalEncoder(output_dim=noisy_latents.size(-1) * noisy_latents.size(-2) * noisy_latents.size(-3)).to(latents.device)
-
     signal_values = batch['signal_values'].float()  # [B, FPS, 512]
     signal_values = torch.nan_to_num(signal_values, nan=0.0)
+
+    signal_encoder = LatentSignalEncoder(output_dim=1024).to(latents.device)
+    signal_encoder2 = LatentSignalEncoder(output_dim=noisy_latents.size(-1) * noisy_latents.size(-2)).to(latents.device)
+    signal_encoder3 = LatentSignalEncoder(input_dim=signal_values.size(1)*signal_values.size(2), output_dim=noisy_latents.size(-1) * noisy_latents.size(-2)).to(latents.device)
+
     signal_embeddings = signal_encoder(signal_values)
     # signal_embeddings, torch.Size([2, 1, 800])
 
@@ -712,15 +713,27 @@ def finetune_unet(accelerator, batch, use_offset_noise,
     encoder_hidden_states = signal_embeddings_resized
     uncond_hidden_states = torch.zeros_like(encoder_hidden_states)
 
-    # noisy_latents: torch.Size([2, 25, 8, 64, 64])
     # mask = batch["mask"]
     # mask = mask.div(255).to(dtype)
-    print("noisy_latents: ", noisy_latents.size())
+
+    # noisy_latents:  torch.Size([8, 4, 20, 64, 64])
     # mask = rearrange(mask, 'b h w -> b 1 1 h w')
     # mask = repeat(mask, 'b 1 1 h w -> (t b) 1 f h w', t=sample.shape[0] // mask.shape[0], f=sample.shape[2])
     # noisy_latents = torch.cat([mask, noisy_latents], dim=1)
     # freeze = repeat(condition_latent, 'b c 1 h w -> b c f h w', f=video_length)
+    signal_embeddings2 = signal_encoder2(signal_values)  # signal_embeddings2 = [8, 20, 64x64]
+    signal_embeddings2 = rearrange(signal_embeddings2, 'b f (c h w)-> b c f h w', c=1,
+                                   h=noisy_latents.size(-2), w=noisy_latents.size(-1))  # [B, FPS, 32]
 
+    signal_values_tmp = rearrange(signal_values, 'b f c-> b (f c)')  # [B, FPS, 32]
+    signal_embeddings3 = signal_encoder3(signal_values_tmp)  # signal_embeddings2 = [8, 20, 64x64]
+    # torch.Size([8, 1, 20, 64, 64]) torch.Size([8, 4096])
+    # print(signal_embeddings2.size(), signal_embeddings3.size())
+    signal_embeddings3 = rearrange(signal_embeddings3, 'b (c f h w)-> b c f h w', c=1, f=1,
+                                   h=noisy_latents.size(-2), w=noisy_latents.size(-1))  # [B, FPS, 32]
+
+    mask = torch.cat((signal_embeddings2, signal_embeddings3), dim=2)
+    # signal_embeddings2 -> [b, 1, f, h, w]
 
     # encoder_hidden_states = text_encoder(token_ids)[0]
     # uncond_hidden_states = text_encoder(uncond_input)[0]
