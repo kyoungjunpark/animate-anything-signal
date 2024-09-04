@@ -379,7 +379,6 @@ def main(
         in_channels=4,
         **kwargs
 ):
-    print("main start")
     *_, config = inspect.getargvalues(inspect.currentframe())
 
     accelerator = Accelerator(
@@ -607,7 +606,7 @@ def main(
                     with accelerator.autocast():
                         batch_eval(accelerator.unwrap_model(unet), vae,
                                    vae_processor, pretrained_model_path,
-                                   validation_data, f"{output_dir}/samples", True, iters=1)
+                                   validation_data, f"{output_dir}/samples", True, global_step=global_step, iters=1)
                         logger.info(f"Saved a new sample to {output_dir}")
 
             logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
@@ -778,7 +777,6 @@ def eval(pipeline, vae_processor, validation_data, out_file, index, forward_t=25
     input_image = input_image.unsqueeze(0).to(dtype).to(device)
     input_image_latents = tensor_to_vae_latent(input_image, vae)
 
-
     initial_latents, timesteps = DDPM_forward_timesteps(input_image_latents, forward_t, validation_data.num_frames,
                                                         diffusion_scheduler)
     with torch.no_grad():
@@ -805,11 +803,11 @@ def eval(pipeline, vae_processor, validation_data, out_file, index, forward_t=25
                                                 caption=out_file.replace('.gif', '.mp4'), fps=fps, format="mp4")})
 
     # real_motion_strength = calculate_latent_motion_score(video_latents).cpu().numpy()[0]
-    precision = calculate_motion_precision(video_frames, np_mask)
+    # precision = calculate_motion_precision(video_frames, np_mask)
 
     del pipeline
     torch.cuda.empty_cache()
-    return precision
+    return True
 
 
 def batch_eval(unet, vae, vae_processor, pretrained_model_path,
@@ -836,20 +834,16 @@ def batch_eval(unet, vae, vae_processor, pretrained_model_path,
 
     motion_errors = []
     motion_precisions = []
-    motion_precision = 0
     for example in eval_list:
         for t in range(iters):
-            name = os.path.basename(validation_data.prompt_image)
+            name, prompt = example
+            # name = os.path.basename(validation_data.prompt_image)
             out_file_dir = f"{output_dir}/{name.split('.')[0]}"
             os.makedirs(out_file_dir, exist_ok=True)
             out_file = f"{out_file_dir}/{global_step + t}.gif"
-            precision = eval(pipeline, vae_processor,
-                             validation_data, out_file, t, forward_t=validation_data.num_inference_steps, preview=preview)
-            motion_precision += precision
+            eval(pipeline, vae_processor, validation_data, out_file, t, forward_t=validation_data.num_inference_steps, preview=preview)
             print("save file", out_file)
 
-    motion_precision = motion_precision / iters
-    print(validation_data.prompt_image, "precision", motion_precision)
     del pipeline
 
 
