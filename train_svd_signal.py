@@ -423,30 +423,6 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     ).pixel_values
     # image_embeddings = pipeline._encode_image(images, device, 1, False)
 
-    # Signal embedding
-    signal_encoder = LatentSignalEncoder().to(device)
-
-    signal_values = batch['signal_values'].float()  # [B, FPS, 512]
-    signal_values = torch.nan_to_num(signal_values, nan=0.0)
-    signal_embeddings = signal_encoder(signal_values)
-    # signal_embeddings, torch.Size([2, 1, 800])
-
-    signal_embeddings = signal_embeddings.reshape(signal_embeddings.size(0), 1, -1)
-    signal_resize_encoder = SignalResizeEncoder(input_dim=signal_embeddings.size(-1), output_dim=1024).half().to(device)
-    # image_resize_encoder = ImageResizeEncoder(input_dim=image_embeddings.size(-1), output_dim=512).half().to(device)
-
-    # image_embeddings = image_resize_encoder(image_embeddings.half())
-    signal_embeddings_resized = signal_resize_encoder(signal_embeddings.half())
-    # Change cross attention (use condition how motion) for signal sensing (see text embedding from animate-anything)
-
-    # encoder_hidden_states = torch.cat((image_embeddings, signal_embeddings), dim=2)
-    encoder_hidden_states = signal_embeddings_resized
-    uncond_hidden_states = torch.zeros_like(encoder_hidden_states)
-
-    if random.random() < 0.15:
-        encoder_hidden_states = uncond_hidden_states
-    # Add noise to the latents according to the noise magnitude at each timestep
-    # (this is the forward diffusion process) #[bsz, f, c, h , w]
     rnd_normal = torch.randn([bsz, 1, 1, 1, 1], device=device)
     sigma = (rnd_normal * P_std + P_mean).exp()
     c_skip = 1 / (sigma ** 2 + 1)
@@ -458,10 +434,50 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     noisy_latents = latents + torch.randn_like(latents) * sigma
     input_latents = torch.cat([c_in * noisy_latents,
                                condition_latent / vae.config.scaling_factor], dim=2)
-    # input_latents:  torch.Size([2, 25, 8, 64, 64])
-    if motion_mask:
-        input_latents = torch.cat([mask, input_latents], dim=2)
 
+
+    # Signal embedding
+    signal_encoder = LatentSignalEncoder(output_dim=1024).to(device)
+    signal_encoder2 = LatentSignalEncoder(output_dim=input_latents.size(-1) * input_latents.size(-2) * input_latents.size(-3)).to(device)
+
+    signal_values = batch['signal_values'].float()  # [B, FPS, 512]
+    bsz = signal_values.size(0)
+    print(signal_values.size())
+    # [B, FPS, 512] -> [B * FPS, 512]
+    signal_values = rearrange(signal_values, 'b f c-> (b f) c')
+    print(signal_values.size())
+    signal_values = torch.nan_to_num(signal_values, nan=0.0)
+    signal_embeddings = signal_encoder(signal_values)
+    signal_embeddings = rearrange(signal_embeddings, '(b f) c-> b f c', b=bsz)  # [B, FPS, 32]
+    print("after rearrange: ", signal_embeddings.size())
+
+    signal_embeddings2 = signal_encoder2(signal_values)
+    signal_embeddings2 = rearrange(signal_embeddings2, '(b f) (c h w)-> b f c h w', b=bsz, c=input_latents.size(-3),
+                                   h=input_latents.size(-2), w=input_latents.size(-1))  # [B, FPS, 32]
+    print("after rearrange2: ", signal_embeddings2.size()) # torch.Size([2, 25, 8, 64, 64])
+
+    # signal_embeddings = signal_embeddings.reshape(signal_embeddings.size(0), 1, -1)
+    # signal_resize_encoder = SignalResizeEncoder(input_dim=signal_embeddings.size(-1), output_dim=1024).half().to(device)
+    # image_resize_encoder = ImageResizeEncoder(input_dim=image_embeddings.size(-1), output_dim=512).half().to(device)
+
+    # image_embeddings = image_resize_encoder(image_embeddings.half())
+    # signal_embeddings_resized = signal_resize_encoder(signal_embeddings.half())
+
+    # Change cross attention (use condition how motion) for signal sensing (see text embedding from animate-anything)
+
+    # encoder_hidden_states = torch.cat((image_embeddings, signal_embeddings), dim=2)
+    encoder_hidden_states = signal_embeddings
+    uncond_hidden_states = torch.zeros_like(encoder_hidden_states)
+
+    if random.random() < 0.15:
+        encoder_hidden_states = uncond_hidden_states
+    # Add noise to the latents according to the noise magnitude at each timestep
+    # (this is the forward diffusion process) #[bsz, f, c, h , w]
+
+    # input_latents:  torch.Size([2, 25, 8, 64, 64])
+    # signal_embeddings2: torch.Size([2, 25, 8, 64, 64])
+    input_latents = torch.cat([signal_embeddings2, input_latents], dim=2)
+    print("final latents ", input_latents.size())
     motion_bucket_id = 127
     fps = 7
     added_time_ids = pipeline._get_add_time_ids(fps, motion_bucket_id,

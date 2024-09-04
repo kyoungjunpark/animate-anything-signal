@@ -751,7 +751,8 @@ def eval(pipeline, vae_processor, validation_data, out_file, index, forward_t=25
     device = vae.device
     dtype = vae.dtype
 
-    prompt = validation_data.prompt
+    # prompt = validation_data.prompt
+    signal = validation_data.signal
     pimg = Image.open(validation_data.prompt_image)
     if pimg.mode == "RGBA":
         pimg = pimg.convert("RGB")
@@ -781,7 +782,7 @@ def eval(pipeline, vae_processor, validation_data, out_file, index, forward_t=25
     mask = rearrange(mask, 'b h w -> b 1 1 h w')
     with torch.no_grad():
         video_frames, video_latents = pipeline(
-            prompt=prompt,
+            # prompt=None,
             latents=initial_latents,
             width=validation_data.width,
             height=validation_data.height,
@@ -789,8 +790,9 @@ def eval(pipeline, vae_processor, validation_data, out_file, index, forward_t=25
             num_inference_steps=validation_data.num_inference_steps,
             guidance_scale=validation_data.guidance_scale,
             condition_latent=input_image_latents,
-            mask=mask,
-            motion=None,
+            signal=signal,
+            # mask=mask,
+            # motion=None,
             return_dict=False,
             timesteps=timesteps,
         )

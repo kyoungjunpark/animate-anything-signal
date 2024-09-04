@@ -3,8 +3,8 @@
 # pretrained_model_path: "output/latent/animate_anything_512_v1.02"
 #pretrained_model_path: "output/latent/train_4fps"
 #pretrained_model_path: "/data/llm/zeroscope_v2_576w"
-# pretrained_model_path: "pretrained"
-pretrained_model_path: "stabilityai/stable-video-diffusion-img2vid-xt"
+pretrained_model_path: "pretrained"
+# pretrained_model_path: "stabilityai/stable-video-diffusion-img2vid-xt"
 
 
 motion_mask: False
@@ -126,6 +126,7 @@ validation_data:
 
   # A custom prompt that is different from your training dataset. 
   prompt: "Test"
+  signal: "example/frame1.pt"
 
   prompt_image: "example/frame1.jpg"
 

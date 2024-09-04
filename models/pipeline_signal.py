@@ -31,6 +31,7 @@ class LatentToVideoPipeline(TextToVideoSDPipeline):
             return_dict: bool = True,
             callback=None,
             callback_steps: int = 1,
+            signal=None,
             cross_attention_kwargs=None,
             condition_latent=None,
             mask=None,
@@ -131,7 +132,9 @@ class LatentToVideoPipeline(TextToVideoSDPipeline):
         # corresponds to doing no classifier free guidance.
         do_classifier_free_guidance = guidance_scale > 1.0
 
-        # 3. Encode input prompt
+        # 3. Encode input signal
+        assert signal, signal
+        print(signal)
 
         # 4. Prepare timesteps
         self.scheduler.set_timesteps(num_inference_steps, device=device)

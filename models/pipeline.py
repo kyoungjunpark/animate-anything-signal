@@ -4,36 +4,39 @@ from einops import rearrange, repeat
 import PIL
 
 from diffusers import TextToVideoSDPipeline, StableVideoDiffusionPipeline
-from diffusers.pipelines.text_to_video_synthesis.pipeline_text_to_video_synth import tensor2vid, TextToVideoSDPipelineOutput
-from diffusers.pipelines.stable_video_diffusion.pipeline_stable_video_diffusion import tensor2vid as svd_tensor2vid, StableVideoDiffusionPipelineOutput
+from diffusers.pipelines.text_to_video_synthesis.pipeline_text_to_video_synth import tensor2vid, \
+    TextToVideoSDPipelineOutput
+from diffusers.pipelines.stable_video_diffusion.pipeline_stable_video_diffusion import tensor2vid as svd_tensor2vid, \
+    StableVideoDiffusionPipelineOutput
 from diffusers.loaders import LoraLoaderMixin, TextualInversionLoaderMixin
 from diffusers.utils.torch_utils import randn_tensor
+
 
 class LatentToVideoPipeline(TextToVideoSDPipeline):
     @torch.no_grad()
     def __call__(
-        self,
-        prompt = None,
-        height= None,
-        width= None,
-        num_frames: int = 16,
-        num_inference_steps: int = 50,
-        guidance_scale= 9.0,
-        negative_prompt= None,
-        eta: float = 0.0,
-        generator= None,
-        latents= None,
-        prompt_embeds= None,
-        negative_prompt_embeds= None,
-        output_type= "np",
-        return_dict: bool = True,
-        callback= None,
-        callback_steps: int = 1,
-        cross_attention_kwargs= None,
-        condition_latent=None,
-        mask=None,
-        timesteps=None,
-        motion=None,
+            self,
+            prompt=None,
+            height=None,
+            width=None,
+            num_frames: int = 16,
+            num_inference_steps: int = 50,
+            guidance_scale=9.0,
+            negative_prompt=None,
+            eta: float = 0.0,
+            generator=None,
+            latents=None,
+            prompt_embeds=None,
+            negative_prompt_embeds=None,
+            output_type="np",
+            return_dict: bool = True,
+            callback=None,
+            callback_steps: int = 1,
+            cross_attention_kwargs=None,
+            condition_latent=None,
+            mask=None,
+            timesteps=None,
+            motion=None,
     ):
         r"""
         Function invoked when calling the pipeline for generation.
@@ -122,7 +125,7 @@ class LatentToVideoPipeline(TextToVideoSDPipeline):
         else:
             batch_size = prompt_embeds.shape[0]
 
-        #device = self._execution_device
+        # device = self._execution_device
         device = latents.device
         # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
         # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
@@ -158,7 +161,8 @@ class LatentToVideoPipeline(TextToVideoSDPipeline):
         # 7. Denoising loop
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         uncondition_latent = condition_latent
-        condition_latent = torch.cat([uncondition_latent, condition_latent]) if do_classifier_free_guidance else condition_latent 
+        condition_latent = torch.cat(
+            [uncondition_latent, condition_latent]) if do_classifier_free_guidance else condition_latent
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 # expand the latents if we are doing classifier free guidance
@@ -213,6 +217,7 @@ class LatentToVideoPipeline(TextToVideoSDPipeline):
 
         return TextToVideoSDPipelineOutput(frames=video)
 
+
 def _append_dims(x, target_dims):
     """Appends dimensions to the end of a tensor until it has target_dims dimensions."""
     dims_to_append = target_dims - x.ndim
@@ -220,29 +225,30 @@ def _append_dims(x, target_dims):
         raise ValueError(f"input has {x.ndim} dims but target_dims is {target_dims}, which is less")
     return x[(...,) + (None,) * dims_to_append]
 
+
 class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
     @torch.no_grad()
     def __call__(
-        self,
-        image,
-        height: int = 576,
-        width: int = 1024,
-        num_frames: Optional[int] = None,
-        num_inference_steps: int = 25,
-        min_guidance_scale: float = 1.0,
-        max_guidance_scale: float = 3.0,
-        fps: int = 7,
-        motion_bucket_id: int = 127,
-        noise_aug_strength: int = 0.02,
-        decode_chunk_size: Optional[int] = None,
-        num_videos_per_prompt: Optional[int] = 1,
-        generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
-        latents: Optional[torch.FloatTensor] = None,
-        output_type: Optional[str] = "pil",
-        callback_on_step_end: Optional[Callable[[int, int, Dict], None]] = None,
-        callback_on_step_end_tensor_inputs: List[str] = ["latents"],
-        return_dict: bool = True,
-        mask = None,
+            self,
+            image,
+            height: int = 576,
+            width: int = 1024,
+            num_frames: Optional[int] = None,
+            num_inference_steps: int = 25,
+            min_guidance_scale: float = 1.0,
+            max_guidance_scale: float = 3.0,
+            fps: int = 7,
+            motion_bucket_id: int = 127,
+            noise_aug_strength: int = 0.02,
+            decode_chunk_size: Optional[int] = None,
+            num_videos_per_prompt: Optional[int] = 1,
+            generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
+            latents: Optional[torch.FloatTensor] = None,
+            output_type: Optional[str] = "pil",
+            callback_on_step_end: Optional[Callable[[int, int, Dict], None]] = None,
+            callback_on_step_end_tensor_inputs: List[str] = ["latents"],
+            return_dict: bool = True,
+            mask=None,
     ):
         r"""
         The call function to the pipeline for generation.
@@ -464,34 +470,35 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
             return frames
 
         return StableVideoDiffusionPipelineOutput(frames=frames)
-        
+
+
 class TextStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
     @torch.no_grad()
     def __call__(
-        self,
-        image,
-        prompt_embeds = None,
-        negative_prompt_embeds = None,
-        height: int = 576,
-        width: int = 1024,
-        num_frames: Optional[int] = None,
-        num_inference_steps: int = 25,
-        min_guidance_scale: float = 1.0,
-        max_guidance_scale: float = 3.0,
-        fps: int = 7,
-        motion_bucket_id: int = 127,
-        noise_aug_strength: int = 0.02,
-        decode_chunk_size: Optional[int] = None,
-        num_videos_per_prompt: Optional[int] = 1,
-        generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
-        latents: Optional[torch.FloatTensor] = None,
-        output_type: Optional[str] = "pil",
-        callback_on_step_end: Optional[Callable[[int, int, Dict], None]] = None,
-        callback_on_step_end_tensor_inputs: List[str] = ["latents"],
-        return_dict: bool = True,
-        mask = None,
-        condition_type = "image",
-        condition_latent = None,
+            self,
+            image,
+            prompt_embeds=None,
+            negative_prompt_embeds=None,
+            height: int = 576,
+            width: int = 1024,
+            num_frames: Optional[int] = None,
+            num_inference_steps: int = 25,
+            min_guidance_scale: float = 1.0,
+            max_guidance_scale: float = 3.0,
+            fps: int = 7,
+            motion_bucket_id: int = 127,
+            noise_aug_strength: int = 0.02,
+            decode_chunk_size: Optional[int] = None,
+            num_videos_per_prompt: Optional[int] = 1,
+            generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
+            latents: Optional[torch.FloatTensor] = None,
+            output_type: Optional[str] = "pil",
+            callback_on_step_end: Optional[Callable[[int, int, Dict], None]] = None,
+            callback_on_step_end_tensor_inputs: List[str] = ["latents"],
+            return_dict: bool = True,
+            mask=None,
+            condition_type="image",
+            condition_latent=None,
     ):
         r"""
         The call function to the pipeline for generation.
@@ -593,9 +600,9 @@ class TextStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         do_classifier_free_guidance = max_guidance_scale > 1.0
 
         # 3. Encode input image
-        if condition_type=="image":
+        if condition_type == "image":
             image_embeddings = self._encode_image(image, device, num_videos_per_prompt, do_classifier_free_guidance)
-        elif condition_type=="text":
+        elif condition_type == "text":
             if do_classifier_free_guidance:
                 prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds])
             image_embeddings = prompt_embeds
@@ -606,8 +613,8 @@ class TextStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
             image_embeddings = torch.cat([image_embeddings, prompt_embeds], dim=1)
         motion_mask = self.unet.config.in_channels == 9
         if do_classifier_free_guidance:
-            mask = torch.cat([mask]*2) 
-        # NOTE: Stable Diffusion Video was conditioned on fps - 1, which
+            mask = torch.cat([mask] * 2)
+            # NOTE: Stable Diffusion Video was conditioned on fps - 1, which
         # is why it is reduced here.
         # See: https://github.com/Stability-AI/generative-models/blob/ed0997173f98eaf8f4edf7ba5fe8f15c6b877fd3/scripts/sampling/simple_video_sample.py#L188
         fps = fps - 1
@@ -630,8 +637,8 @@ class TextStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
             condition_latent = image_latents.unsqueeze(1).repeat(1, num_frames, 1, 1, 1)
         else:
             if do_classifier_free_guidance:
-                condition_latent = torch.cat([condition_latent] * 2) 
-        # 5. Get Added Time IDs
+                condition_latent = torch.cat([condition_latent] * 2)
+                # 5. Get Added Time IDs
 
         # cast back to fp16 if needed
         if needs_upcasting:
