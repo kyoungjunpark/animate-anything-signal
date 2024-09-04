@@ -111,8 +111,8 @@ lora_rank: 16
 
 # Training data parameters
 train_data:
-  width: 512
-  height: 512
+  width: 480
+  height: 480
   use_bucketing: False
   return_mask: True
   return_motion: True
@@ -137,8 +137,8 @@ validation_data:
   num_frames: 20
 
   # Height and width of validation sample.
-  width: 512
-  height: 512
+  width: 480
+  height: 480
 
   # Number of inference steps when generating the video.
   num_inference_steps: 25

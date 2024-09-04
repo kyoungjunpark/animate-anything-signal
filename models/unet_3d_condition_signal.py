@@ -379,7 +379,7 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin):
         upsample_size = None
 
         if any(s % default_overall_up_factor != 0 for s in sample.shape[-2:]):
-            logger.info("Forward upsample size to force interpolation output size.", sample.shape)
+            logger.info("Forward upsample size to force interpolation output size.", sample.shape) # torch.Size([2, 4, 21, 55, 74]
             forward_upsample_size = True
 
         # prepare attention_mask
