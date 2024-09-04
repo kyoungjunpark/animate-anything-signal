@@ -471,8 +471,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     loss = 0
 
     accelerator.wait_for_everyone()
-    model_pred = unet(input_latents, c_noise, encoder_hidden_states=encoder_hidden_states,
-                      added_time_ids=added_time_ids).sample
+    model_pred = unet(input_latents, c_noise, encoder_hidden_states=encoder_hidden_states, added_time_ids=added_time_ids).sample
     predict_x0 = c_out * model_pred + c_skip * noisy_latents
     loss += ((predict_x0 - latents) ** 2 * loss_weight).mean()
     if motion_mask:

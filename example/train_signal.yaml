@@ -1,8 +1,11 @@
 # Pretrained diffusers model path.
 #pretrained_model_path: "output/latent/train_mask_motion" #https://huggingface.co/damo-vilab/text-to-video-ms-1.7b/tree/main
-pretrained_model_path: "output/latent/animate_anything_512_v1.02"
+# pretrained_model_path: "output/latent/animate_anything_512_v1.02"
 #pretrained_model_path: "output/latent/train_4fps"
 #pretrained_model_path: "/data/llm/zeroscope_v2_576w"
+# pretrained_model_path: "pretrained"
+pretrained_model_path: "stabilityai/stable-video-diffusion-img2vid-xt"
+
 
 motion_mask: False
 motion_strength: False
@@ -101,10 +104,6 @@ unet_lora_modules:
   #- "GEGLU"
   #- "TemporalConvLayer"
 
-# The modules to use for LoRA. Different from `trainable_text_modules`.
-text_encoder_lora_modules:
-  - "CLIPEncoderLayer"
-  #- "CLIPAttention"
 
 # The rank for LoRA training. With ModelScope, the maximum should be 1024. 
 # VRAM increases with higher rank, lower when decreased.
@@ -119,22 +118,22 @@ train_data:
   return_motion: True
   sample_start_idx: 1
   fps: 8
-  n_sample_frames: 16
-  json_path: '/webvid/animation0.json'
+  n_sample_frames: 20
+  json_path: '/home/aiscuser/animate-anything-signal/example/signal_blip.json'
 
 # Validation data parameters.
 validation_data:
 
   # A custom prompt that is different from your training dataset. 
-  prompt: "a girl moves hands"
+  prompt: "Test"
 
-  prompt_image: "output/example/girl4.jpg"
+  prompt_image: "example/frame1.jpg"
 
   # Whether or not to sample preview during training (Requires more VRAM).
   sample_preview: True
 
   # The number of frames to sample during validation.
-  num_frames: 16
+  num_frames: 20
 
   # Height and width of validation sample.
   width: 512
@@ -176,16 +175,16 @@ validation_steps: 200
 # Which modules we want to unfreeze for the UNET. Advanced usage.
 # I think "all" is just training all params whether it includes others afterwards.
 trainable_modules:
-  #- "all"
+  - "all"
   # If you want to ignore temporal attention entirely, remove "attn1-2" and replace with ".attentions"
   # This is for self attetion. Activates for spatial and temporal dimensions if n_sample_frames > 1
   - "attn1"
   - ".attentions"
-  
+
   # This is for cross attention (image & text data). Activates for spatial and temporal dimensions if n_sample_frames > 1
   - "attn2"
   - "conv_in"
-  
+
   #  Convolution networks that hold temporal information. Activates for spatial and temporal dimensions if n_sample_frames > 1
   - "temp_conv"
   - "motion"

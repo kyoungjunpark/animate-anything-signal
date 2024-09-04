@@ -693,7 +693,7 @@ class CachedDataset(Dataset):
         return cached_latent
 
 
-def get_train_dataset(dataset_types, train_data):
+def get_train_dataset(dataset_types, train_data, tokenizer=None):
     train_datasets = []
     dataset_cls = [VideoJsonDataset, SingleVideoDataset, ImageDataset, VideoFolderDataset, VideoBLIPDataset]
     dataset_map = {d.__getname__(): d for d in dataset_cls}
@@ -701,7 +701,7 @@ def get_train_dataset(dataset_types, train_data):
     # Loop through all available datasets, get the name, then add to list of data to process.
     for dataset in dataset_types:
         if dataset in dataset_map:
-            train_datasets.append(dataset_map[dataset](**train_data))
+            train_datasets.append(dataset_map[dataset](**train_data, tokenizer=tokenizer))
         else:
             raise ValueError(f"Dataset type not found: {dataset} not in {dataset_map.keys()}")
     return train_datasets

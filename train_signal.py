@@ -95,6 +95,7 @@ def load_primary_models(pretrained_model_path, in_channels=-1):
     vae = AutoencoderKL.from_pretrained(pretrained_model_path, subfolder="vae")
     unet = UNet3DConditionModel.from_pretrained(pretrained_model_path, subfolder="unet")
     if in_channels > 0 and unet.config.in_channels != in_channels:
+        print(f"[load_primary_models] Handle the channel mismatch {unet.config.in_channels} vs {in_channels}")
         # first time init, modify unet conv in
         unet2 = unet
         unet = UNet3DConditionModel.from_pretrained(pretrained_model_path, subfolder="unet",
@@ -305,7 +306,7 @@ def save_pipe(
     pipeline = LatentToVideoPipeline.from_pretrained(
         path,
         unet=unet_out,
-        # text_encoder=text_encoder_out,
+        text_encoder=None,
         vae=vae_out,
     ).to(torch_dtype=torch.float32)
 
@@ -378,6 +379,7 @@ def main(
         in_channels=5,
         **kwargs
 ):
+    print("main start")
     *_, config = inspect.getargvalues(inspect.currentframe())
 
     accelerator = Accelerator(
@@ -708,7 +710,7 @@ def finetune_unet(accelerator, batch, use_offset_noise,
     # signal_embeddings, torch.Size([2, 1, 800])
 
     signal_embeddings = signal_embeddings.reshape(signal_embeddings.size(0), 1, -1)
-    signal_resize_encoder = SignalResizeEncoder(input_dim=signal_embeddings.size(-1), output_dim=1024).half().to(device)
+    signal_resize_encoder = SignalResizeEncoder(input_dim=signal_embeddings.size(-1), output_dim=1024).half().to(latents.device)
     # image_resize_encoder = ImageResizeEncoder(input_dim=image_embeddings.size(-1), output_dim=512).half().to(device)
 
     # image_embeddings = image_resize_encoder(image_embeddings.half())
@@ -739,10 +741,6 @@ def finetune_unet(accelerator, batch, use_offset_noise,
                       encoder_hidden_states=encoder_hidden_states, motion=latent_motion).sample
     loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
     predict_x0 = remove_noise(noise_scheduler, noisy_latents, model_pred, timesteps)
-    if motion_strength:
-        motion_loss = F.mse_loss(latent_motion,
-                                 calculate_latent_motion_score(predict_x0))
-        loss += 0.001 * motion_loss
 
     return loss, latents
 
@@ -781,7 +779,6 @@ def eval(pipeline, vae_processor, validation_data, out_file, index, forward_t=25
     b, c, f, h, w = initial_latents.shape
     mask = T.Resize([h, w], antialias=False)(mask)
     mask = rearrange(mask, 'b h w -> b 1 1 h w')
-    motion_strength = validation_data.get("strength", index + 3)
     with torch.no_grad():
         video_frames, video_latents = pipeline(
             prompt=prompt,
@@ -793,7 +790,7 @@ def eval(pipeline, vae_processor, validation_data, out_file, index, forward_t=25
             guidance_scale=validation_data.guidance_scale,
             condition_latent=input_image_latents,
             mask=mask,
-            motion=[motion_strength],
+            motion=None,
             return_dict=False,
             timesteps=timesteps,
         )
@@ -801,10 +798,8 @@ def eval(pipeline, vae_processor, validation_data, out_file, index, forward_t=25
         fps = validation_data.get('fps', 8)
         imageio.mimwrite(out_file, video_frames, duration=int(1000 / fps), loop=0)
         imageio.mimwrite(out_file.replace('gif', '.mp4'), video_frames, fps=fps)
-    real_motion_strength = calculate_latent_motion_score(video_latents).cpu().numpy()[0]
+    # real_motion_strength = calculate_latent_motion_score(video_latents).cpu().numpy()[0]
     precision = calculate_motion_precision(video_frames, np_mask)
-    print(
-        f"save file {out_file}, motion strength {motion_strength} -> {real_motion_strength}, motion precision {precision}")
 
     del pipeline
     torch.cuda.empty_cache()
@@ -818,7 +813,8 @@ def batch_eval(unet, vae, vae_processor, pretrained_model_path,
     unet.eval()
     pipeline = LatentToVideoPipeline.from_pretrained(
         pretrained_model_path,
-        # text_encoder=text_encoder,
+        text_encoder=None,
+        tokenizer=None,
         vae=vae,
         unet=unet
     )
@@ -849,8 +845,6 @@ def main_eval(
         enable_xformers_memory_efficient_attention: bool = True,
         enable_torch_2_attn: bool = False,
         seed: Optional[int] = None,
-        motion_mask=False,
-        motion_strength=False,
         **kwargs
 ):
     if seed is not None:
