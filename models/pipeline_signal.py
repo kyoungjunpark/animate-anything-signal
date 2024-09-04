@@ -127,16 +127,20 @@ class LatentToVideoPipeline(TextToVideoSDPipeline):
         do_classifier_free_guidance = guidance_scale > 1.0
         # 3. Encode input signal
         # signal [FPS, 512]
-        signal_values = torch.nan_to_num(signal, nan=0.0)
+        signal_values = torch.nan_to_num(signal, nan=0.0)  # signal_values torch.Size([154, 512])
+        signal_values = signal_values[0:num_frames, :]
+        signal_values = rearrange(signal_values, '(b f) c-> b f c', b=batch_size)
 
         signal_encoder = LatentSignalEncoder(output_dim=1024).to(device)
         signal_embeddings = signal_encoder(signal_values)
         # print(signal_embeddings.size()) # torch.Size([154, 1024])
-        signal_embeddings = rearrange(signal_embeddings, '(b f) c-> b f c', b=batch_size)  # [B, FPS, 32]
+        # signal_embeddings = rearrange(signal_embeddings, '(b f) c-> b f c', b=batch_size)  # [B, FPS, 32]
 
         encoder_hidden_states = signal_embeddings
 
         encoder_hidden_states = torch.cat([encoder_hidden_states] * 2) if do_classifier_free_guidance else encoder_hidden_states
+
+        # latents torch.Size([1, 4, 20, 55, 74])
 
         # mask
         signal_encoder2 = LatentSignalEncoder(output_dim=latents.size(-1) * latents.size(-2)).to(
@@ -156,6 +160,8 @@ class LatentToVideoPipeline(TextToVideoSDPipeline):
                                        h=latents.size(-2), w=latents.size(-1))  # [B, FPS, 32]
 
         mask = torch.cat((signal_embeddings2, signal_embeddings3), dim=2)
+        mask = torch.cat([mask] * 2) if do_classifier_free_guidance else mask
+
         # 4. Prepare timesteps
         self.scheduler.set_timesteps(num_inference_steps, device=device)
         if timesteps is None:
@@ -181,8 +187,6 @@ class LatentToVideoPipeline(TextToVideoSDPipeline):
                     motion = torch.tensor(motion, device=device)
                 # print(latent_model_input.size(), encoder_hidden_states.size())
                 # torch.Size([2, 4, 20, 55, 74]) torch.Size([154, 1, 1024])
-                print(do_classifier_free_guidance)
-
                 noise_pred = self.unet(
                     latent_model_input,
                     t,

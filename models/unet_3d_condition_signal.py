@@ -423,6 +423,9 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin):
         # 2. pre-process
         if self.motion_mask and mask is not None:
             # mask = repeat(mask, 'b 1 1 h w -> (t b) 1 f h w', t=sample.shape[0] // mask.shape[0], f=sample.shape[2])
+            # print(mask.size(), sample.size())
+            # torch.Size([8, 1, 21, 64, 64]) torch.Size([8, 4, 21, 64, 64])
+            # torch.Size([1, 1, 21, 55, 74]) torch.Size([2, 4, 21, 55, 74])
             sample = torch.cat([mask, sample], dim=1)
             sample = sample.permute(0, 2, 1, 3, 4).reshape((sample.shape[0] * num_frames, -1) + sample.shape[3:])
             sample = self.conv_in2(sample)
