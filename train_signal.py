@@ -307,6 +307,7 @@ def save_pipe(
         path,
         unet=unet_out,
         text_encoder=None,
+        tokenizer=None,
         vae=vae_out,
     ).to(torch_dtype=torch.float32)
 
@@ -547,6 +548,19 @@ def main(
     # See: https://github.com/prigoyal/pytorch_memonger/blob/master/tutorial/Checkpointing_for_PyTorch_models.ipynb
     if kwargs.get('eval_train', False):
         unet.eval()
+
+    if accelerator.is_main_process:
+        print("Save it!!!!!!!!!")
+        save_pipe(
+            pretrained_model_path,
+            global_step,
+            accelerator,
+            accelerator.unwrap_model(unet),
+            vae,
+            output_dir,
+            is_checkpoint=True,
+            save_pretrained_model=save_pretrained_model
+        )
 
     for epoch in range(first_epoch, num_train_epochs):
         train_loss = 0.0
