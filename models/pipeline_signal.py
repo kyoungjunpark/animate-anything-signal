@@ -131,8 +131,8 @@ class LatentToVideoPipeline(TextToVideoSDPipeline):
         signal_values = signal_values[0:num_frames, :]
         signal_values = rearrange(signal_values, '(b f) c-> b f c', b=batch_size)
 
-        signal_encoder = LatentSignalEncoder(output_dim=1024).to(device)
-        signal_embeddings = signal_encoder(signal_values)
+        signal_encoder = LatentSignalEncoder(output_dim=1024)
+        signal_embeddings = signal_encoder(signal_values).half().to(latents.device)
         # print(signal_embeddings.size()) # torch.Size([154, 1024])
         # signal_embeddings = rearrange(signal_embeddings, '(b f) c-> b f c', b=batch_size)  # [B, FPS, 32]
 
@@ -148,12 +148,12 @@ class LatentToVideoPipeline(TextToVideoSDPipeline):
         signal_encoder3 = LatentSignalEncoder(input_dim=signal_values.size(1) * signal_values.size(2),
                                               output_dim=latents.size(-1) * latents.size(-2)).to(
             latents.device)
-        signal_embeddings2 = signal_encoder2(signal_values)  # signal_embeddings2 = [8, 20, 64x64]
+        signal_embeddings2 = signal_encoder2(signal_values).half().to(latents.device)  # signal_embeddings2 = [8, 20, 64x64]
         signal_embeddings2 = rearrange(signal_embeddings2, 'b f (c h w)-> b c f h w', c=1,
                                        h=latents.size(-2), w=latents.size(-1))  # [B, FPS, 32]
 
         signal_values_tmp = rearrange(signal_values, 'b f c-> b (f c)')  # [B, FPS, 32]
-        signal_embeddings3 = signal_encoder3(signal_values_tmp)  # signal_embeddings2 = [8, 20, 64x64]
+        signal_embeddings3 = signal_encoder3(signal_values_tmp).half().to(latents.device)  # signal_embeddings2 = [8, 20, 64x64]
         # torch.Size([8, 1, 20, 64, 64]) torch.Size([8, 4096])
         # print(signal_embeddings2.size(), signal_embeddings3.size())
         signal_embeddings3 = rearrange(signal_embeddings3, 'b (c f h w)-> b c f h w', c=1, f=1,

@@ -608,6 +608,7 @@ def main(
                         batch_eval(accelerator.unwrap_model(unet), vae,
                                    vae_processor, pretrained_model_path,
                                    validation_data, f"{output_dir}/samples", True, iters=1)
+                        logger.info(f"Saved a new sample to {output_dir}")
 
             logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
             accelerator.log({"training_loss": loss.detach().item()}, step=step)
@@ -693,12 +694,11 @@ def finetune_unet(accelerator, batch, use_offset_noise,
     # token_ids = batch['prompt_ids']
     signal_values = batch['signal_values'].float()  # [B, FPS, 512]
     signal_values = torch.nan_to_num(signal_values, nan=0.0)
-
     signal_encoder = LatentSignalEncoder(output_dim=1024).to(latents.device)
     signal_encoder2 = LatentSignalEncoder(output_dim=noisy_latents.size(-1) * noisy_latents.size(-2)).to(latents.device)
     signal_encoder3 = LatentSignalEncoder(input_dim=signal_values.size(1)*signal_values.size(2), output_dim=noisy_latents.size(-1) * noisy_latents.size(-2)).to(latents.device)
 
-    signal_embeddings = signal_encoder(signal_values)
+    signal_embeddings = signal_encoder(signal_values).half().to(latents.device)
     # signal_embeddings, torch.Size([2, 1, 800])
 
     signal_embeddings = signal_embeddings.reshape(signal_embeddings.size(0), 1, -1)
@@ -706,7 +706,7 @@ def finetune_unet(accelerator, batch, use_offset_noise,
     # image_resize_encoder = ImageResizeEncoder(input_dim=image_embeddings.size(-1), output_dim=512).half().to(device)
 
     # image_embeddings = image_resize_encoder(image_embeddings.half())
-    signal_embeddings_resized = signal_resize_encoder(signal_embeddings.half())
+    signal_embeddings_resized = signal_resize_encoder(signal_embeddings).half().to(latents.device)
     # Change cross attention (use condition how motion) for signal sensing (see text embedding from animate-anything)
 
     # encoder_hidden_states = torch.cat((image_embeddings, signal_embeddings), dim=2)
@@ -721,12 +721,12 @@ def finetune_unet(accelerator, batch, use_offset_noise,
     # mask = repeat(mask, 'b 1 1 h w -> (t b) 1 f h w', t=sample.shape[0] // mask.shape[0], f=sample.shape[2])
     # noisy_latents = torch.cat([mask, noisy_latents], dim=1)
     # freeze = repeat(condition_latent, 'b c 1 h w -> b c f h w', f=video_length)
-    signal_embeddings2 = signal_encoder2(signal_values)  # signal_embeddings2 = [8, 20, 64x64]
+    signal_embeddings2 = signal_encoder2(signal_values).half().to(latents.device)  # signal_embeddings2 = [8, 20, 64x64]
     signal_embeddings2 = rearrange(signal_embeddings2, 'b f (c h w)-> b c f h w', c=1,
                                    h=noisy_latents.size(-2), w=noisy_latents.size(-1))  # [B, FPS, 32]
 
     signal_values_tmp = rearrange(signal_values, 'b f c-> b (f c)')  # [B, FPS, 32]
-    signal_embeddings3 = signal_encoder3(signal_values_tmp)  # signal_embeddings2 = [8, 20, 64x64]
+    signal_embeddings3 = signal_encoder3(signal_values_tmp).half().to(latents.device)  # signal_embeddings2 = [8, 20, 64x64]
     # torch.Size([8, 1, 20, 64, 64]) torch.Size([8, 4096])
     # print(signal_embeddings2.size(), signal_embeddings3.size())
     signal_embeddings3 = rearrange(signal_embeddings3, 'b (c f h w)-> b c f h w', c=1, f=1,
@@ -778,22 +778,9 @@ def eval(pipeline, vae_processor, validation_data, out_file, index, forward_t=25
     input_image = input_image.unsqueeze(0).to(dtype).to(device)
     input_image_latents = tensor_to_vae_latent(input_image, vae)
 
-    if 'mask' in validation_data:
-        mask = Image.open(validation_data.mask)
-        mask = mask.resize((validation_data.width, validation_data.height))
-        np_mask = np.array(mask)
-        np_mask[np_mask != 0] = 255
-    else:
-        np_mask = np.ones([validation_data.height, validation_data.width], dtype=np.uint8) * 255
-    out_mask_path = os.path.splitext(out_file)[0] + "_mask.jpg"
-    Image.fromarray(np_mask).save(out_mask_path)
 
     initial_latents, timesteps = DDPM_forward_timesteps(input_image_latents, forward_t, validation_data.num_frames,
                                                         diffusion_scheduler)
-    mask = T.ToTensor()(np_mask).to(dtype).to(device)
-    b, c, f, h, w = initial_latents.shape
-    mask = T.Resize([h, w], antialias=False)(mask)
-    mask = rearrange(mask, 'b h w -> b 1 1 h w')
     with torch.no_grad():
         video_frames, video_latents = pipeline(
             # prompt=None,
@@ -813,7 +800,10 @@ def eval(pipeline, vae_processor, validation_data, out_file, index, forward_t=25
     if preview:
         fps = validation_data.get('fps', 8)
         imageio.mimwrite(out_file, video_frames, duration=int(1000 / fps), loop=0)
-        imageio.mimwrite(out_file.replace('gif', '.mp4'), video_frames, fps=fps)
+        imageio.mimwrite(out_file.replace('.gif', '.mp4'), video_frames, fps=fps)
+        wandb.log({"Generated mp4": wandb.Video(out_file.replace('.gif', '.mp4'),
+                                                caption=out_file.replace('.gif', '.mp4'), fps=fps, format="mp4")})
+
     # real_motion_strength = calculate_latent_motion_score(video_latents).cpu().numpy()[0]
     precision = calculate_motion_precision(video_frames, np_mask)
 
@@ -823,7 +813,7 @@ def eval(pipeline, vae_processor, validation_data, out_file, index, forward_t=25
 
 
 def batch_eval(unet, vae, vae_processor, pretrained_model_path,
-               validation_data, output_dir, preview, global_step=0, iters=6):
+               validation_data, output_dir, preview, global_step=0, iters=6, eval_file=None):
     device = vae.device
     dtype = vae.dtype
     unet.eval()
@@ -839,17 +829,25 @@ def batch_eval(unet, vae, vae_processor, pretrained_model_path,
     diffusion_scheduler.set_timesteps(validation_data.num_inference_steps, device=device)
     pipeline.scheduler = diffusion_scheduler
 
+    if eval_file is not None:
+        eval_list = json.load(open(eval_file))
+    else:
+        eval_list = [[validation_data.prompt_image, validation_data.prompt]]
+
     motion_errors = []
     motion_precisions = []
     motion_precision = 0
-    for t in range(iters):
-        name = os.path.basename(validation_data.prompt_image)
-        out_file_dir = f"{output_dir}/{name.split('.')[0]}"
-        os.makedirs(out_file_dir, exist_ok=True)
-        out_file = f"{out_file_dir}/{global_step + t}.gif"
-        precision = eval(pipeline, vae_processor,
-                         validation_data, out_file, t, forward_t=validation_data.num_inference_steps, preview=preview)
-        motion_precision += precision
+    for example in eval_list:
+        for t in range(iters):
+            name = os.path.basename(validation_data.prompt_image)
+            out_file_dir = f"{output_dir}/{name.split('.')[0]}"
+            os.makedirs(out_file_dir, exist_ok=True)
+            out_file = f"{out_file_dir}/{global_step + t}.gif"
+            precision = eval(pipeline, vae_processor,
+                             validation_data, out_file, t, forward_t=validation_data.num_inference_steps, preview=preview)
+            motion_precision += precision
+            print("save file", out_file)
+
     motion_precision = motion_precision / iters
     print(validation_data.prompt_image, "precision", motion_precision)
     del pipeline
