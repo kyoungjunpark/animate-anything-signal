@@ -11,6 +11,8 @@ from diffusers.pipelines.stable_video_diffusion.pipeline_stable_video_diffusion 
 from diffusers.loaders import LoraLoaderMixin, TextualInversionLoaderMixin
 from diffusers.utils.torch_utils import randn_tensor
 
+from models.layerdiffuse_VAE import LatentSignalEncoder
+
 
 class LatentToVideoPipeline(TextToVideoSDPipeline):
     @torch.no_grad()
@@ -26,7 +28,6 @@ class LatentToVideoPipeline(TextToVideoSDPipeline):
             eta: float = 0.0,
             generator=None,
             latents=None,
-            signal_embeds=None,
             output_type="np",
             return_dict: bool = True,
             callback=None,
@@ -114,27 +115,27 @@ class LatentToVideoPipeline(TextToVideoSDPipeline):
 
         # 1. Check inputs. Raise error if not correct
         self.check_inputs(
-            prompt, height, width, callback_steps, negative_prompt, signal_embeds, None
+            prompt, height, width, callback_steps, negative_prompt, signal, None
         )
 
-        # 2. Define call parameters
-        if prompt is not None and isinstance(prompt, str):
-            batch_size = 1
-        elif prompt is not None and isinstance(prompt, list):
-            batch_size = len(prompt)
-        else:
-            batch_size = signal_embeds.shape[0]
-
+        batch_size = 1
         # device = self._execution_device
         device = latents.device
         # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
         # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
         # corresponds to doing no classifier free guidance.
         do_classifier_free_guidance = guidance_scale > 1.0
-
         # 3. Encode input signal
-        assert signal, signal
-        print(signal)
+        # signal [FPS, 512]
+        signal_encoder = LatentSignalEncoder(output_dim=1024).to(device)
+        signal_values = torch.nan_to_num(signal, nan=0.0)
+        signal_embeddings = signal_encoder(signal_values)
+        # print(signal_embeddings.size()) # torch.Size([154, 1024])
+        signal_embeddings = rearrange(signal_embeddings, '(b f) c-> b f c', b=batch_size)  # [B, FPS, 32]
+
+        encoder_hidden_states = signal_embeddings
+
+        encoder_hidden_states = torch.cat([encoder_hidden_states] * 2) if do_classifier_free_guidance else encoder_hidden_states
 
         # 4. Prepare timesteps
         self.scheduler.set_timesteps(num_inference_steps, device=device)
@@ -159,10 +160,14 @@ class LatentToVideoPipeline(TextToVideoSDPipeline):
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
                 if motion is not None:
                     motion = torch.tensor(motion, device=device)
+                # print(latent_model_input.size(), encoder_hidden_states.size())
+                # torch.Size([2, 4, 20, 55, 74]) torch.Size([154, 1, 1024])
+                print(do_classifier_free_guidance)
+
                 noise_pred = self.unet(
                     latent_model_input,
                     t,
-                    encoder_hidden_states=signal_embeds,  # TODO: to be replaced
+                    encoder_hidden_states=encoder_hidden_states,  # TODO: to be replaced
                     cross_attention_kwargs=cross_attention_kwargs,
                     condition_latent=condition_latent,
                     mask=mask,

@@ -376,7 +376,7 @@ def main(
         save_pretrained_model: bool = True,
         logger_type: str = 'tensorboard',
         motion_mask=False,
-        in_channels=5,
+        in_channels=4,
         **kwargs
 ):
     print("main start")
@@ -673,20 +673,10 @@ def finetune_unet(accelerator, batch, use_offset_noise,
     video_length = latents.shape[2]
     condition_latent = latents[:, :, 0:1].detach().clone()
 
-    mask = batch["mask"]
-    mask = mask.div(255).to(dtype)
-
-    h, w = latents.shape[-2:]
-    mask = T.Resize((h, w), antialias=False)(mask)
-    mask[mask < 0.5] = 0
-    mask[mask >= 0.5] = 1
-    mask = rearrange(mask, 'b h w -> b 1 1 h w')
-
-    freeze = repeat(condition_latent, 'b c 1 h w -> b c f h w', f=video_length)
-    if motion_mask:
-        latents = freeze * (1 - mask) + latents * mask
-    motion = batch["motion"]
-    latent_motion = calculate_latent_motion_score(latents)
+    # if motion_mask:
+    #     latents = freeze * (1 - mask) + latents * mask
+    # motion = batch["motion"]
+    # latent_motion = calculate_latent_motion_score(latents)
     # Sample noise that we'll add to the latents
     use_offset_noise = use_offset_noise and not rescale_schedule
     noise = sample_noise(latents, offset_noise_strength, use_offset_noise)
@@ -702,7 +692,8 @@ def finetune_unet(accelerator, batch, use_offset_noise,
     # Encode text embeddings
     # token_ids = batch['prompt_ids']
 
-    signal_encoder = LatentSignalEncoder().to(latents.device)
+    signal_encoder = LatentSignalEncoder(output_dim=1024).to(latents.device)
+    signal_encoder2 = LatentSignalEncoder(output_dim=noisy_latents.size(-1) * noisy_latents.size(-2) * noisy_latents.size(-3)).to(latents.device)
 
     signal_values = batch['signal_values'].float()  # [B, FPS, 512]
     signal_values = torch.nan_to_num(signal_values, nan=0.0)
@@ -721,6 +712,15 @@ def finetune_unet(accelerator, batch, use_offset_noise,
     encoder_hidden_states = signal_embeddings_resized
     uncond_hidden_states = torch.zeros_like(encoder_hidden_states)
 
+    # noisy_latents: torch.Size([2, 25, 8, 64, 64])
+    # mask = batch["mask"]
+    # mask = mask.div(255).to(dtype)
+    print("noisy_latents: ", noisy_latents.size())
+    # mask = rearrange(mask, 'b h w -> b 1 1 h w')
+    # mask = repeat(mask, 'b 1 1 h w -> (t b) 1 f h w', t=sample.shape[0] // mask.shape[0], f=sample.shape[2])
+    # noisy_latents = torch.cat([mask, noisy_latents], dim=1)
+    # freeze = repeat(condition_latent, 'b c 1 h w -> b c f h w', f=video_length)
+
 
     # encoder_hidden_states = text_encoder(token_ids)[0]
     # uncond_hidden_states = text_encoder(uncond_input)[0]
@@ -738,7 +738,7 @@ def finetune_unet(accelerator, batch, use_offset_noise,
         encoder_hidden_states = uncond_hidden_states
 
     model_pred = unet(noisy_latents, timesteps, condition_latent=condition_latent, mask=mask,
-                      encoder_hidden_states=encoder_hidden_states, motion=latent_motion).sample
+                      encoder_hidden_states=encoder_hidden_states, motion=None).sample
     loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
     predict_x0 = remove_noise(noise_scheduler, noisy_latents, model_pred, timesteps)
 
@@ -752,7 +752,8 @@ def eval(pipeline, vae_processor, validation_data, out_file, index, forward_t=25
     dtype = vae.dtype
 
     # prompt = validation_data.prompt
-    signal = validation_data.signal
+    signal = torch.load(validation_data.signal, map_location="cuda:0", weights_only=True)
+
     pimg = Image.open(validation_data.prompt_image)
     if pimg.mode == "RGBA":
         pimg = pimg.convert("RGB")
