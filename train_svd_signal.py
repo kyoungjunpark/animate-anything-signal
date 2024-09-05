@@ -49,7 +49,7 @@ import imageio
 import wandb
 import sys
 
-from models.pipeline import MaskStableVideoDiffusionPipeline
+from models.pipeline_signal import MaskStableVideoDiffusionPipeline
 from utils.common import read_mask, generate_random_mask, slerp, calculate_motion_score, \
     read_video, calculate_motion_precision, calculate_latent_motion_score, \
     DDPM_forward, DDPM_forward_timesteps, motion_mask_loss
@@ -395,19 +395,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     image = image + noise_aug_strength * torch.randn_like(image)
     image_latent = vae.encode(image).latent_dist.mode() * vae.config.scaling_factor
 
-    if motion_mask:
-        mask = batch['mask']
-        mask = mask.div(255)
-        h, w = latents.shape[-2:]
-        mask = T.Resize((h, w), antialias=False)(mask)
-        mask[mask < 0.5] = 0
-        mask[mask >= 0.5] = 1
-        mask = repeat(mask, 'b h w -> b f 1 h w', f=num_frames).detach().clone()
-        mask[:, 0] = 0
-        freeze = repeat(image_latent, 'b c h w -> b f c h w', f=num_frames)
-        condition_latent = latents * (1 - mask) + freeze * mask
-    else:
-        condition_latent = repeat(image_latent, 'b c h w->b f c h w', f=num_frames)
+    condition_latent = repeat(image_latent, 'b c h w->b f c h w', f=num_frames)
 
     pipeline.image_encoder.to(device, dtype=dtype)
 
@@ -438,7 +426,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
 
     # Signal embedding
     signal_encoder = LatentSignalEncoder(output_dim=1024).to(device)
-    signal_encoder2 = LatentSignalEncoder(output_dim=input_latents.size(-1) * input_latents.size(-2) * input_latents.size(-3)).to(device)
+    signal_encoder2 = LatentSignalEncoder(output_dim=input_latents.size(-1) * input_latents.size(-2)).to(device)
 
     signal_values = batch['signal_values'].float()  # [B, FPS, 512]
     bsz = signal_values.size(0)
@@ -452,7 +440,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     print("after rearrange: ", signal_embeddings.size())
 
     signal_embeddings2 = signal_encoder2(signal_values)
-    signal_embeddings2 = rearrange(signal_embeddings2, '(b f) (c h w)-> b f c h w', b=bsz, c=input_latents.size(-3),
+    signal_embeddings2 = rearrange(signal_embeddings2, '(b f) (c h w)-> b f c h w', b=bsz, c=1,
                                    h=input_latents.size(-2), w=input_latents.size(-1))  # [B, FPS, 32]
     print("after rearrange2: ", signal_embeddings2.size()) # torch.Size([2, 25, 8, 64, 64])
 
@@ -475,7 +463,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     # (this is the forward diffusion process) #[bsz, f, c, h , w]
 
     # input_latents:  torch.Size([2, 25, 8, 64, 64])
-    # signal_embeddings2: torch.Size([2, 25, 8, 64, 64])
+    # signal_embeddings2: torch.Size([2, 25, 8 -> 1, 64, 64])
     input_latents = torch.cat([signal_embeddings2, input_latents], dim=2)
     print("final latents ", input_latents.size())
     motion_bucket_id = 127
@@ -490,8 +478,6 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     model_pred = unet(input_latents, c_noise, encoder_hidden_states=encoder_hidden_states, added_time_ids=added_time_ids).sample
     predict_x0 = c_out * model_pred + c_skip * noisy_latents
     loss += ((predict_x0 - latents) ** 2 * loss_weight).mean()
-    if motion_mask:
-        loss += F.mse_loss(predict_x0 * (1 - mask), condition_latent * (1 - mask))
     return loss
 
 
@@ -808,7 +794,9 @@ def eval(pipeline, vae_processor, validation_data, out_file, index, forward_t=25
     diffusion_scheduler = pipeline.scheduler
     diffusion_scheduler.set_timesteps(validation_data.num_inference_steps, device=device)
 
-    prompt = validation_data.prompt
+    # prompt = validation_data.prompt
+    signal = torch.load(validation_data.signal, map_location="cuda:0", weights_only=True)
+
     pimg = Image.open(validation_data.prompt_image)
     if pimg.mode == "RGBA":
         pimg = pimg.convert("RGB")
@@ -834,12 +822,14 @@ def eval(pipeline, vae_processor, validation_data, out_file, index, forward_t=25
 
     # prepare inital latents
     initial_latents = None
+    signal_encoder2 = LatentSignalEncoder(output_dim=input_latents.size(-1) * input_latents.size(-2)).to(device)
+
     with torch.no_grad():
         if motion_mask:
-            h, w = validation_data.height // pipeline.vae_scale_factor, validation_data.width // pipeline.vae_scale_factor
-            initial_latents = torch.randn([1, validation_data.num_frames, 4, h, w], dtype=dtype, device=device)
-            mask = T.ToTensor()(np_mask).to(dtype).to(device)
-            mask = T.Resize([h, w], antialias=False)(mask)
+            # h, w = validation_data.height // pipeline.vae_scale_factor, validation_data.width // pipeline.vae_scale_factor
+            # initial_latents = torch.randn([1, validation_data.num_frames, 4, h, w], dtype=dtype, device=device)
+            # mask = T.ToTensor()(np_mask).to(dtype).to(device)
+            # mask = T.Resize([h, w], antialias=False)(mask)
             video_frames = MaskStableVideoDiffusionPipeline.__call__(
                 pipeline,
                 image=pimg,
@@ -850,7 +840,8 @@ def eval(pipeline, vae_processor, validation_data, out_file, index, forward_t=25
                 decode_chunk_size=validation_data.decode_chunk_size,
                 fps=validation_data.fps,
                 motion_bucket_id=validation_data.motion_bucket_id,
-                mask=mask
+                mask=None,
+                signal=signal
             ).frames[0]
         else:
             video_frames = pipeline(

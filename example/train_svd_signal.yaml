@@ -1,6 +1,6 @@
 # Pretrained diffusers model path.
 #pretrained_model_path: "output/latent/train_mask_motion" #https://huggingface.co/damo-vilab/text-to-video-ms-1.7b/tree/main
-# pretrained_model_path: "output/svd/train_2024-09-01T06-21-52/checkpoint-2500/"
+# pretrained_model_path: "pretrained/animate_anything_svd_v1.0"
 
 
 motion_mask: True
