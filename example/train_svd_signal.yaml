@@ -1,7 +1,7 @@
 # Pretrained diffusers model path.
 #pretrained_model_path: "output/latent/train_mask_motion" #https://huggingface.co/damo-vilab/text-to-video-ms-1.7b/tree/main
 # pretrained_model_path: "pretrained/animate_anything_svd_v1.0"
-
+pretrained_model_path: "pretrained/animate_anything_svd_v1.0"
 
 motion_mask: True
 motion_strength: False
@@ -172,6 +172,7 @@ validation_data:
   prompt: "Test"
 
   prompt_image: "example/frame1.jpg"
+  signal: "example/frame1.pt"
 
   # Whether or not to sample preview during training (Requires more VRAM).
   sample_preview: True

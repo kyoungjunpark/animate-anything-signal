@@ -58,7 +58,7 @@ already_printed_trainables = False
 
 logger = get_logger(__name__, log_level="INFO")
 
-wandb.init(project="signal_svd")
+wandb.init(project="signal_svd_only")
 
 wandb.require("core")
 
@@ -409,8 +409,8 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
         do_rescale=False,
         return_tensors="pt",
     ).pixel_values
-    # image_embeddings = pipeline._encode_image(images, device, 1, False)
-
+    image_embeddings = pipeline._encode_image(images, device, 1, False)
+    # print("image_embedding: ", image_embeddings.size()) image_embedding:  torch.Size([2, 1, 1024])
     rnd_normal = torch.randn([bsz, 1, 1, 1, 1], device=device)
     sigma = (rnd_normal * P_std + P_mean).exp()
     c_skip = 1 / (sigma ** 2 + 1)
@@ -423,26 +423,32 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     input_latents = torch.cat([c_in * noisy_latents,
                                condition_latent / vae.config.scaling_factor], dim=2)
 
-
     # Signal embedding
-    signal_encoder = LatentSignalEncoder(output_dim=1024).to(device)
+    signal_values = batch['signal_values'].float()  # [B, FPS, 512]
+    signal_values = torch.nan_to_num(signal_values, nan=0.0)
+
+    signal_encoder = LatentSignalEncoder(input_dim=signal_values.size(-1) * signal_values.size(-2) ,output_dim=1024).to(device)
     signal_encoder2 = LatentSignalEncoder(output_dim=input_latents.size(-1) * input_latents.size(-2)).to(device)
 
-    signal_values = batch['signal_values'].float()  # [B, FPS, 512]
+
     bsz = signal_values.size(0)
-    print(signal_values.size())
+    fps = signal_values.size(1)
+
     # [B, FPS, 512] -> [B * FPS, 512]
-    signal_values = rearrange(signal_values, 'b f c-> (b f) c')
-    print(signal_values.size())
     signal_values = torch.nan_to_num(signal_values, nan=0.0)
-    signal_embeddings = signal_encoder(signal_values)
-    signal_embeddings = rearrange(signal_embeddings, '(b f) c-> b f c', b=bsz)  # [B, FPS, 32]
-    print("after rearrange: ", signal_embeddings.size())
+
+    signal_values_resized = rearrange(signal_values, 'b f c-> b (f c)')
+    # print(signal_values.size())
+    signal_embeddings = signal_encoder(signal_values_resized).half().to(latents.device)
+    signal_embeddings = signal_embeddings.reshape(bsz, 1, -1)
+
+    # signal_embeddings = rearrange(signal_embeddings, '(b f) c-> b f c', b=bsz)  # [B, FPS, 32]
+    # print("after rearrange: ", signal_embeddings.size())  # torch.Size([2, 25 -> 1, 1024]) torch.Size([50, 1, 1024])
 
     signal_embeddings2 = signal_encoder2(signal_values)
-    signal_embeddings2 = rearrange(signal_embeddings2, '(b f) (c h w)-> b f c h w', b=bsz, c=1,
+    signal_embeddings2 = rearrange(signal_embeddings2, 'b f (c h w)-> b f c h w', b=bsz, c=1,
                                    h=input_latents.size(-2), w=input_latents.size(-1))  # [B, FPS, 32]
-    print("after rearrange2: ", signal_embeddings2.size()) # torch.Size([2, 25, 8, 64, 64])
+    # print("after rearrange2: ", signal_embeddings2.size()) # after rearrange2:  torch.Size([2, 25, 1, 64, 64])
 
     # signal_embeddings = signal_embeddings.reshape(signal_embeddings.size(0), 1, -1)
     # signal_resize_encoder = SignalResizeEncoder(input_dim=signal_embeddings.size(-1), output_dim=1024).half().to(device)
@@ -465,9 +471,8 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     # input_latents:  torch.Size([2, 25, 8, 64, 64])
     # signal_embeddings2: torch.Size([2, 25, 8 -> 1, 64, 64])
     input_latents = torch.cat([signal_embeddings2, input_latents], dim=2)
-    print("final latents ", input_latents.size())
+    # print("final latents ", input_latents.size()) # final latents  torch.Size([2, 25, 9, 64, 64])
     motion_bucket_id = 127
-    fps = 7
     added_time_ids = pipeline._get_add_time_ids(fps, motion_bucket_id,
                                                 noise_aug_strength, signal_embeddings.dtype, bsz, 1, False)
     added_time_ids = added_time_ids.to(device)
@@ -822,8 +827,6 @@ def eval(pipeline, vae_processor, validation_data, out_file, index, forward_t=25
 
     # prepare inital latents
     initial_latents = None
-    signal_encoder2 = LatentSignalEncoder(output_dim=input_latents.size(-1) * input_latents.size(-2)).to(device)
-
     with torch.no_grad():
         if motion_mask:
             # h, w = validation_data.height // pipeline.vae_scale_factor, validation_data.width // pipeline.vae_scale_factor

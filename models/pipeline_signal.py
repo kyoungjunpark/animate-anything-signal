@@ -204,19 +204,45 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
 
         self._guidance_scale = guidance_scale
         # signal
-        signal_values = torch.nan_to_num(signal, nan=0.0)  # signal_values torch.Size([154, 512])
-        signal_values = signal_values[0:num_frames, :]
-        signal_values = rearrange(signal_values, '(b f) c-> b f c', b=batch_size)
+        signal_values = signal.float()  # [B, FPS, 512]
+        signal_values = torch.nan_to_num(signal_values, nan=0.0)
 
-        signal_encoder2 = LatentSignalEncoder(output_dim=latents.size(-1) * latents.size(-2)).to(
-            latents.device)
+        signal_encoder = LatentSignalEncoder(input_dim=signal_values.size(-1) * signal_values.size(-2),
+                                             output_dim=1024).to(device)
+        signal_encoder2 = LatentSignalEncoder(output_dim=latents.size(-1) * latents.size(-2)).to(device)
 
-        signal_embeddings2 = signal_encoder2(signal_values).half().to(
-            latents.device)  # signal_embeddings2 = [8, 20, 64x64]
-        signal_embeddings2 = rearrange(signal_embeddings2, 'b f (c h w)-> b c f h w', c=1,
+        bsz = signal_values.size(0)
+        fps = signal_values.size(1)
+
+        # [B, FPS, 512] -> [B * FPS, 512]
+        signal_values = torch.nan_to_num(signal_values, nan=0.0)
+
+        signal_values_resized = rearrange(signal_values, 'b f c-> b (f c)')
+        # print(signal_values.size())
+        signal_embeddings = signal_encoder(signal_values_resized).half().to(latents.device)
+        signal_embeddings = signal_embeddings.reshape(bsz, 1, -1)
+
+        # signal_embeddings = rearrange(signal_embeddings, '(b f) c-> b f c', b=bsz)  # [B, FPS, 32]
+        # print("after rearrange: ", signal_embeddings.size())  # torch.Size([2, 25 -> 1, 1024]) torch.Size([50, 1, 1024])
+
+        signal_embeddings2 = signal_encoder2(signal_values)
+        signal_embeddings2 = rearrange(signal_embeddings2, 'b f (c h w)-> b f c h w', b=bsz, c=1,
                                        h=latents.size(-2), w=latents.size(-1))  # [B, FPS, 32]
+        # print("after rearrange2: ", signal_embeddings2.size()) # after rearrange2:  torch.Size([2, 25, 1, 64, 64])
 
+        # signal_embeddings = signal_embeddings.reshape(signal_embeddings.size(0), 1, -1)
+        # signal_resize_encoder = SignalResizeEncoder(input_dim=signal_embeddings.size(-1), output_dim=1024).half().to(device)
+        # image_resize_encoder = ImageResizeEncoder(input_dim=image_embeddings.size(-1), output_dim=512).half().to(device)
+
+        # image_embeddings = image_resize_encoder(image_embeddings.half())
+        # signal_embeddings_resized = signal_resize_encoder(signal_embeddings.half())
+
+        # Change cross attention (use condition how motion) for signal sensing (see text embedding from animate-anything)
+
+        # encoder_hidden_states = torch.cat((image_embeddings, signal_embeddings), dim=2)
+        encoder_hidden_states = signal_embeddings
         mask = signal_embeddings2
+
         mask = torch.cat([mask] * 2) if do_classifier_free_guidance else mask
 
 
