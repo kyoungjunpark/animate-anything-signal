@@ -42,7 +42,7 @@ from diffusers.pipelines.stable_video_diffusion.pipeline_stable_video_diffusion 
 from transformers import CLIPTextModel, CLIPTokenizer, CLIPVisionModel, CLIPImageProcessor, CLIPTextConfig
 from transformers.models.clip.modeling_clip import CLIPEncoder
 
-from models.layerdiffuse_VAE import LatentSignalEncoder, ImageResizeEncoder, SignalResizeEncoder
+from models.layerdiffuse_VAE import LatentSignalEncoder
 from utils.dataset import get_train_dataset, extend_datasets
 from einops import rearrange, repeat
 import imageio
@@ -98,8 +98,14 @@ def load_primary_models(pretrained_model_path, eval=False):
                                                                 variant='fp16')
     else:
         pipeline = StableVideoDiffusionPipeline.from_pretrained(pretrained_model_path)
+    fps = 25
+    CHIRP_LEN = 512
+    signal_encoder = LatentSignalEncoder(input_dim=fps * CHIRP_LEN, output_dim=1024)
+
+    signal_encoder2 = LatentSignalEncoder(output_dim=60 * 60)
+
     return pipeline, None, pipeline.feature_extractor, pipeline.scheduler, pipeline.image_processor, \
-           pipeline.image_encoder, pipeline.vae, pipeline.unet
+           pipeline.image_encoder, pipeline.vae, pipeline.unet, signal_encoder, signal_encoder2
 
 
 def convert_svd(pretrained_model_path, out_path):
@@ -330,6 +336,8 @@ def save_pipe(
         unet,
         text_encoder,
         vae,
+        sig1,
+        sig2,
         output_dir,
         is_checkpoint=False,
         save_pretrained_model=True
@@ -373,7 +381,7 @@ def prompt_image(image, processor, encoder):
 
 
 def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
-                  rescale_schedule, offset_noise_strength, unet, motion_mask,
+                  rescale_schedule, offset_noise_strength, unet, sig1, sig2, motion_mask,
                   P_mean=0.7, P_std=1.6):
     pipeline.vae.eval()
     pipeline.image_encoder.eval()
@@ -427,9 +435,10 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     signal_values = batch['signal_values'].float()  # [B, FPS, 512]
     signal_values = torch.nan_to_num(signal_values, nan=0.0)
 
-    signal_encoder = LatentSignalEncoder(input_dim=signal_values.size(-1) * signal_values.size(-2) ,output_dim=1024).to(device)
-    signal_encoder2 = LatentSignalEncoder(output_dim=input_latents.size(-1) * input_latents.size(-2)).to(device)
-
+    # signal_encoder = LatentSignalEncoder(input_dim=signal_values.size(-1) * signal_values.size(-2), output_dim=1024).to(device)
+    # signal_encoder2 = LatentSignalEncoder(output_dim=input_latents.size(-1) * input_latents.size(-2)).to(device)
+    signal_encoder = sig1
+    signal_encoder2 = sig2
 
     bsz = signal_values.size(0)
     fps = signal_values.size(1)
@@ -556,10 +565,10 @@ def main(
         output_dir = create_output_folders(output_dir, config)
 
     # Load scheduler, tokenizer and models. The text encoder is actually image encoder for SVD
-    pipeline, tokenizer, feature_extractor, train_scheduler, vae_processor, text_encoder, vae, unet = load_primary_models(
+    pipeline, tokenizer, feature_extractor, train_scheduler, vae_processor, text_encoder, vae, unet, sig1, sig2 = load_primary_models(
         pretrained_model_path)
     # Freeze any necessary models
-    freeze_models([vae, text_encoder, unet])
+    freeze_models([vae, unet])
 
     # Enable xformers if available
     handle_memory_attention(enable_xformers_memory_efficient_attention, enable_torch_2_attn, unet)
@@ -664,7 +673,7 @@ def main(
     weight_dtype = is_mixed_precision(accelerator)
 
     # Move text encoders, and VAE to GPU
-    models_to_cast = [text_encoder, vae]
+    models_to_cast = [text_encoder, vae, sig1, sig2]
     cast_to_gpu_and_type(models_to_cast, accelerator.device, weight_dtype)
 
     # We need to initialize the trackers we use, and also store our configuration.
@@ -705,6 +714,8 @@ def main(
             accelerator.unwrap_model(unet),
             accelerator.unwrap_model(text_encoder),
             vae,
+            sig1,
+            sig2,
             output_dir,
             is_checkpoint=True,
             save_pretrained_model=save_pretrained_model
@@ -722,7 +733,7 @@ def main(
             with accelerator.accumulate(unet), accelerator.accumulate(text_encoder):
                 with accelerator.autocast():
                     loss = finetune_unet(accelerator, pipeline, batch, use_offset_noise,
-                                         rescale_schedule, offset_noise_strength, unet, motion_mask)
+                                         rescale_schedule, offset_noise_strength, unet, sig1, sig2, motion_mask)
                 device = loss.device
                 # Gather the losses across all processes for logging (if we use distributed training).
                 avg_loss = accelerator.gather(loss.repeat(train_batch_size)).mean()
@@ -740,8 +751,9 @@ def main(
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
                 progress_bar.update(1)
-                global_step += 1
                 accelerator.log({"train_loss": train_loss}, step=global_step)
+                global_step += 1
+
                 train_loss = 0.0
 
                 if global_step % checkpointing_steps == 0 and accelerator.is_main_process:
@@ -752,6 +764,8 @@ def main(
                         accelerator.unwrap_model(unet),
                         accelerator.unwrap_model(text_encoder),
                         vae,
+                        sig1,
+                        sig2,
                         output_dir,
                         is_checkpoint=True,
                         save_pretrained_model=save_pretrained_model
@@ -764,7 +778,7 @@ def main(
                             curr_dataset_name = batch['dataset'][0]
                             save_filename = f"{global_step}_dataset-{curr_dataset_name}"
                             out_file = f"{output_dir}/samples/{save_filename}.gif"
-                            eval(pipeline, vae_processor, validation_data, out_file, global_step)
+                            eval(pipeline, vae_processor, sig1, sig2, validation_data, out_file, global_step)
                             logger.info(f"Saved a new sample to {out_file}")
 
             logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
@@ -791,7 +805,7 @@ def main(
     accelerator.end_training()
 
 
-def eval(pipeline, vae_processor, validation_data, out_file, index, forward_t=25, preview=True):
+def eval(pipeline, vae_processor, sig1, sig2, validation_data, out_file, index, forward_t=25, preview=True):
     vae = pipeline.vae
     device = vae.device
     dtype = vae.dtype
@@ -800,7 +814,7 @@ def eval(pipeline, vae_processor, validation_data, out_file, index, forward_t=25
     diffusion_scheduler.set_timesteps(validation_data.num_inference_steps, device=device)
 
     # prompt = validation_data.prompt
-    signal = torch.load(validation_data.signal, map_location="cuda:0", weights_only=True)
+    signal = torch.load(validation_data.signal, map_location="cuda:0", weights_only=True).to(dtype).to(device)
 
     pimg = Image.open(validation_data.prompt_image)
     if pimg.mode == "RGBA":
@@ -844,7 +858,9 @@ def eval(pipeline, vae_processor, validation_data, out_file, index, forward_t=25
                 fps=validation_data.fps,
                 motion_bucket_id=validation_data.motion_bucket_id,
                 mask=None,
-                signal=signal
+                signal=signal,
+                sig1=sig1,
+                sig2=sig2
             ).frames[0]
         else:
             video_frames = pipeline(

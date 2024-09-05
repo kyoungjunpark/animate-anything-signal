@@ -37,7 +37,9 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
             callback_on_step_end_tensor_inputs: List[str] = ["latents"],
             return_dict: bool = True,
             mask=None,
-            signal=None
+            signal=None,
+            sig1=None,
+            sig2=None
     ):
         r"""
         The call function to the pipeline for generation.
@@ -132,6 +134,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
             batch_size = len(image)
         else:
             batch_size = image.shape[0]
+        assert batch_size == 1
         device = self._execution_device
         # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
         # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
@@ -204,29 +207,36 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
 
         self._guidance_scale = guidance_scale
         # signal
-        signal_values = signal.float()  # [B, FPS, 512]
+        signal_values = signal.float()  # [FPS, 512]
+
         signal_values = torch.nan_to_num(signal_values, nan=0.0)
+        signal_values = signal_values[0:num_frames, :]
 
-        signal_encoder = LatentSignalEncoder(input_dim=signal_values.size(-1) * signal_values.size(-2),
-                                             output_dim=1024).to(device)
-        signal_encoder2 = LatentSignalEncoder(output_dim=latents.size(-1) * latents.size(-2)).to(device)
+        signal_values = signal_values.unsqueeze(0)
+        # print("unsqueeze", signal_values.size())
 
-        bsz = signal_values.size(0)
-        fps = signal_values.size(1)
+        # signal_encoder = LatentSignalEncoder(input_dim=signal_values.size(-1) * signal_values.size(-2), output_dim=1024).to(device)
+        # signal_encoder2 = LatentSignalEncoder(output_dim=latents.size(-1) * latents.size(-2)).to(device)
+        signal_encoder = sig1
+        signal_encoder2 = sig2
+        # bsz = signal_values.size(0)
+        # fps = signal_values.size(1)
 
         # [B, FPS, 512] -> [B * FPS, 512]
-        signal_values = torch.nan_to_num(signal_values, nan=0.0)
+        signal_values_resized = rearrange(signal_values, 'b f c-> b (f c)', b=batch_size)
 
-        signal_values_resized = rearrange(signal_values, 'b f c-> b (f c)')
-        # print(signal_values.size())
+        # print("signal_values_resized", signal_values.size())
         signal_embeddings = signal_encoder(signal_values_resized).half().to(latents.device)
-        signal_embeddings = signal_embeddings.reshape(bsz, 1, -1)
+        signal_embeddings = signal_embeddings.reshape(batch_size, 1, -1)
+        # print("signal_embeddings", signal_embeddings.size())
 
         # signal_embeddings = rearrange(signal_embeddings, '(b f) c-> b f c', b=bsz)  # [B, FPS, 32]
         # print("after rearrange: ", signal_embeddings.size())  # torch.Size([2, 25 -> 1, 1024]) torch.Size([50, 1, 1024])
 
         signal_embeddings2 = signal_encoder2(signal_values)
-        signal_embeddings2 = rearrange(signal_embeddings2, 'b f (c h w)-> b f c h w', b=bsz, c=1,
+        # print("signal_values", signal_values.size())
+        # print("signal_embeddings2", signal_embeddings2.size())
+        signal_embeddings2 = rearrange(signal_embeddings2, 'b f (c h w)-> b f c h w', b=batch_size, c=1,
                                        h=latents.size(-2), w=latents.size(-1))  # [B, FPS, 32]
         # print("after rearrange2: ", signal_embeddings2.size()) # after rearrange2:  torch.Size([2, 25, 1, 64, 64])
 
@@ -240,10 +250,12 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         # Change cross attention (use condition how motion) for signal sensing (see text embedding from animate-anything)
 
         # encoder_hidden_states = torch.cat((image_embeddings, signal_embeddings), dim=2)
-        encoder_hidden_states = signal_embeddings
-        mask = signal_embeddings2
+        encoder_hidden_states = signal_embeddings.to(image_embeddings.dtype)
+        mask = signal_embeddings2.to(image_embeddings.dtype)
+        # print("mask ", mask.size()) # mask, torch.Size([1, 25, 1, 56, 72])
 
         mask = torch.cat([mask] * 2) if do_classifier_free_guidance else mask
+        encoder_hidden_states = torch.cat([encoder_hidden_states] * 2) if do_classifier_free_guidance else encoder_hidden_states
 
 
         # 8. Denoising loop
@@ -257,12 +269,11 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
 
                 # Concatenate image_latents over channels dimention
                 latent_model_input = torch.cat([mask, latent_model_input, image_latents], dim=2)
-
                 # predict the noise residual
                 noise_pred = self.unet(
                     latent_model_input,
                     t,
-                    encoder_hidden_states=image_embeddings,
+                    encoder_hidden_states=encoder_hidden_states,
                     added_time_ids=added_time_ids,
                     return_dict=False,
                 )[0]
