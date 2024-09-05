@@ -8,7 +8,7 @@ motion_strength: False
 
 logger_type: "wandb"
 # The folder where your training outputs will be placed.
-output_dir: "./output/svd_only"
+output_dir: "./output/svd_signal"
 
 # You can train multiple datasets at once. They will be joined together for training.
 # Simply remove the line you don't need, or keep them all for mixed training.
@@ -228,7 +228,7 @@ max_train_steps: 10000
 checkpointing_steps: 2500
 
 # How many steps to do for validation if sample_preview is enabled.
-validation_steps: 300
+validation_steps: 100
 
 # Which modules we want to unfreeze for the UNET. Advanced usage.
 trainable_modules:

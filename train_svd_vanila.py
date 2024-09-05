@@ -38,24 +38,17 @@ from diffusers.models.attention import BasicTransformerBlock
 from diffusers import StableVideoDiffusionPipeline
 from diffusers.pipelines.stable_video_diffusion.pipeline_stable_video_diffusion import _resize_with_antialiasing
 
-from transformers import CLIPTextModel, CLIPTokenizer, CLIPVisionModel, CLIPImageProcessor, CLIPTextConfig
-from transformers.models.clip.modeling_clip import CLIPEncoder
 from utils.dataset_vanila import get_train_dataset, extend_datasets
 from einops import rearrange, repeat
 import imageio
 import wandb
 
-from models.unet_3d_condition_mask import UNet3DConditionModel
 from models.pipeline import MaskStableVideoDiffusionPipeline
-from utils.common import read_mask, generate_random_mask, slerp, calculate_motion_score, \
-    read_video, calculate_motion_precision, calculate_latent_motion_score, \
-    DDPM_forward, DDPM_forward_timesteps, motion_mask_loss
 
 already_printed_trainables = False
 
 logger = get_logger(__name__, log_level="INFO")
 
-wandb.init(project="valina_svd")
 
 def create_logging(logging, logger, accelerator):
     logging.basicConfig(
@@ -371,6 +364,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
                   P_mean=0.7, P_std=1.6):
     pipeline.vae.eval()
     pipeline.image_encoder.eval()
+
     device = unet.device
     dtype = pipeline.vae.dtype
     vae = pipeline.vae
@@ -529,7 +523,6 @@ def main(
     pipeline, tokenizer, feature_extractor, train_scheduler, vae_processor, text_encoder, vae, unet = load_primary_models(
         pretrained_model_path)
 
-    convert_svd(pretrained_model_path, )
     # Freeze any necessary models
     freeze_models([vae, text_encoder, unet])
 
@@ -681,6 +674,8 @@ def main(
             is_checkpoint=True,
             save_pretrained_model=save_pretrained_model
         )
+        wandb.init(project="valina_svd")
+
     for epoch in range(first_epoch, num_train_epochs):
         train_loss = 0.0
 

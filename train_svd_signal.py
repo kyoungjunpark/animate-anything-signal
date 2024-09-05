@@ -8,7 +8,6 @@ import random
 import gc
 import copy
 import json
-
 from typing import Dict, Optional, Tuple
 from omegaconf import OmegaConf
 import numpy as np
@@ -35,32 +34,21 @@ from diffusers.utils import check_min_version
 from diffusers.utils.import_utils import is_xformers_available
 from diffusers.models.attention_processor import AttnProcessor2_0, Attention
 from diffusers.models.attention import BasicTransformerBlock
-from diffusers.pipelines.text_to_video_synthesis.pipeline_text_to_video_synth import tensor2vid
+
 from diffusers import StableVideoDiffusionPipeline
 from diffusers.pipelines.stable_video_diffusion.pipeline_stable_video_diffusion import _resize_with_antialiasing
-
-from transformers import CLIPTextModel, CLIPTokenizer, CLIPVisionModel, CLIPImageProcessor, CLIPTextConfig
-from transformers.models.clip.modeling_clip import CLIPEncoder
 
 from models.layerdiffuse_VAE import LatentSignalEncoder
 from utils.dataset import get_train_dataset, extend_datasets
 from einops import rearrange, repeat
 import imageio
 import wandb
-import sys
 
 from models.pipeline_signal import MaskStableVideoDiffusionPipeline
-from utils.common import read_mask, generate_random_mask, slerp, calculate_motion_score, \
-    read_video, calculate_motion_precision, calculate_latent_motion_score, \
-    DDPM_forward, DDPM_forward_timesteps, motion_mask_loss
 
 already_printed_trainables = False
 
 logger = get_logger(__name__, log_level="INFO")
-
-wandb.init(project="signal_svd_only")
-
-wandb.require("core")
 
 
 def create_logging(logging, logger, accelerator):
@@ -493,7 +481,8 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     loss = 0
 
     accelerator.wait_for_everyone()
-    model_pred = unet(input_latents, c_noise, encoder_hidden_states=encoder_hidden_states, added_time_ids=added_time_ids).sample
+    model_pred = unet(input_latents, c_noise, encoder_hidden_states=encoder_hidden_states,
+                      added_time_ids=added_time_ids).sample
     predict_x0 = c_out * model_pred + c_skip * noisy_latents
     loss += ((predict_x0 - latents) ** 2 * loss_weight).mean()
     return loss
@@ -684,6 +673,9 @@ def main(
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
         accelerator.init_trackers("text2video-fine-tune")
+        wandb.init(project="svd_with_signal")
+
+        wandb.require("core")
 
     # Train!
     total_batch_size = train_batch_size * accelerator.num_processes * gradient_accumulation_steps
