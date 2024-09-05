@@ -3,7 +3,7 @@
 # pretrained_model_path: "output/svd/train_2024-09-01T06-21-52/checkpoint-2500/"
 
 
-motion_mask: False
+motion_mask: True
 motion_strength: False
 
 logger_type: "wandb"
@@ -66,7 +66,7 @@ lora_version: "stable_lora"
 
 # Use LoRA for the UNET model.
 # use_unet_lora: False
-use_unet_lora: True
+use_unet_lora: False
 
 # Use LoRA for the Text Encoder. If this is set, the text encoder for the model will not be trained.
 use_text_lora: False
@@ -154,7 +154,7 @@ train_data:
   path: "/home/aiscuser/locomotion_video_whole_mp4/"
 
   # 'json'
-  json_path: '/home/aiscuser/animate-anything/example/signal_blip.json'
+  json_path: '/home/aiscuser/animate-anything-signal/example/signal_blip.json'
 
   # 'image'
   image_dir: '/vlp/datasets/images/coco'
@@ -172,8 +172,9 @@ validation_data:
   # A custom prompt that is different from your training dataset. 
   prompt: "Test"
 
-  prompt_image: "example/frame1.jpg"
+  signal: "example/frame1.pt"
 
+  prompt_image: "example/frame1.jpg"
   # Whether or not to sample preview during training (Requires more VRAM).
   sample_preview: True
 
@@ -235,7 +236,7 @@ trainable_modules:
   # If you want to ignore temporal attention entirely, remove "attn1-2" and replace with ".attentions"
   # This is for self attetion. Activates for spatial and temporal dimensions if n_sample_frames > 1
   - "attn1"
-  #- ".attentions"
+  - ".attentions"
   
   # This is for cross attention (image & text data). Activates for spatial and temporal dimensions if n_sample_frames > 1
   - "attn2"

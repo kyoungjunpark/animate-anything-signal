@@ -170,7 +170,7 @@ class LatentToVideoPipeline(TextToVideoSDPipeline):
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
                 if motion is not None:
                     motion = torch.tensor(motion, device=device)
-                print(prompt_embeds.size(), latent_model_input.size())
+
                 noise_pred = self.unet(
                     latent_model_input,
                     t,

@@ -37,7 +37,7 @@ use_offset_noise: False
 
 # Uses schedule rescale, also known as the "better" offset noise. See https://arxiv.org/pdf/2305.08891.pdf
 # If this is enabled, offset noise will be disabled.
-rescale_schedule: True
+rescale_schedule: False
 
 # When True, this extends all items in all enabled datasets to the highest length. 
 # For example, if you have 200 videos and 10 images, 10 images will be duplicated to the length of 200. 
@@ -66,10 +66,12 @@ train_text_encoder: False
 # It solely saves the weight differential between the initialized weights and updates. 
 
 # "cloneofsimo" or "stable_lora"
-lora_version: "cloneofsimo"
+# lora_version: "cloneofsimo"
+lora_version: "stable_lora"
 
 # Use LoRA for the UNET model.
-use_unet_lora: False
+# use_unet_lora: False
+use_unet_lora: True
 
 # Use LoRA for the Text Encoder. If this is set, the text encoder for the model will not be trained.
 use_text_lora: False
@@ -128,9 +130,9 @@ validation_data:
 
   # A custom prompt that is different from your training dataset. 
   prompt: "Test"
-  signal: "example/frame1.pt"
+  signal: ["example/frame1.pt"]
 
-  prompt_image: "example/frame1.jpg"
+  prompt_image: ["example/frame1.jpg"]
 
   # Whether or not to sample preview during training (Requires more VRAM).
   sample_preview: True
@@ -167,7 +169,7 @@ extra_text_encoder_params: null
   #adam_weight_decay: 0.2
 
 # How many batches to train. Not to be confused with video frames.
-train_batch_size: 8
+train_batch_size: 2
 # Maximum number of train steps. Model is saved after training.
 max_train_steps: 10000
 
@@ -199,7 +201,7 @@ trainable_modules:
 trainable_text_modules: null
 
 # Seed for validation.
-seed: null
+seed: 42
 
 # Whether or not we want to use mixed precision with accelerate
 mixed_precision: "fp16"

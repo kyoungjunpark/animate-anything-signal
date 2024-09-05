@@ -377,7 +377,7 @@ def main(
         save_pretrained_model: bool = True,
         logger_type: str = 'tensorboard',
         motion_mask=False,
-        in_channels=4,
+        in_channels=5,
         **kwargs
 ):
     *_, config = inspect.getargvalues(inspect.currentframe())
@@ -678,7 +678,8 @@ def finetune_unet(accelerator, batch, use_offset_noise,
     dtype = vae.dtype
     # Convert videos to latent space
     pixel_values = batch["pixel_values"].to(dtype)
-    bsz = pixel_values.shape[0]
+    bsz, num_frames = pixel_values.shape[:2]
+
     if not cache_latents:
         latents = tensor_to_vae_latent(pixel_values, vae)
     else:
@@ -763,24 +764,24 @@ def finetune_unet(accelerator, batch, use_offset_noise,
     if random.random() < 0.15:
         encoder_hidden_states = uncond_hidden_states
 
+    accelerator.wait_for_everyone()
     model_pred = unet(noisy_latents, timesteps, condition_latent=condition_latent, mask=mask,
                       encoder_hidden_states=encoder_hidden_states, motion=None).sample
     loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
-    predict_x0 = remove_noise(noise_scheduler, noisy_latents, model_pred, timesteps)
 
     return loss, latents
 
 
-def eval(pipeline, vae_processor, validation_data, out_file, index, forward_t=25, preview=True):
+def eval(pipeline, vae_processor, validation_data, image, signal, out_file, index, forward_t=25, preview=True):
     vae = pipeline.vae
     diffusion_scheduler = pipeline.scheduler
     device = vae.device
     dtype = vae.dtype
 
     # prompt = validation_data.prompt
-    signal = torch.load(validation_data.signal, map_location="cuda:0", weights_only=True)
+    signal = torch.load(signal, map_location="cuda:0", weights_only=True)
 
-    pimg = Image.open(validation_data.prompt_image)
+    pimg = Image.open(image)
     if pimg.mode == "RGBA":
         pimg = pimg.convert("RGB")
     width, height = pimg.size
@@ -841,21 +842,15 @@ def batch_eval(unet, vae, vae_processor, pretrained_model_path,
     diffusion_scheduler.set_timesteps(validation_data.num_inference_steps, device=device)
     pipeline.scheduler = diffusion_scheduler
 
-    if eval_file is not None:
-        eval_list = json.load(open(eval_file))
-    else:
-        eval_list = [[validation_data.prompt_image, validation_data.prompt]]
-
     motion_errors = []
     motion_precisions = []
-    for example in eval_list:
+    for image, signal in zip(validation_data.prompt_image, validation_data.signal):
         for t in range(iters):
-            name, prompt = example
             # name = os.path.basename(validation_data.prompt_image)
-            out_file_dir = f"{output_dir}/{name.split('.')[0]}"
+            out_file_dir = f"{output_dir}/{image.split('.')[0]}"
             os.makedirs(out_file_dir, exist_ok=True)
             out_file = f"{out_file_dir}/{global_step + t}.gif"
-            eval(pipeline, vae_processor, validation_data, out_file, t, forward_t=validation_data.num_inference_steps, preview=preview)
+            eval(pipeline, vae_processor, validation_data, image, signal, out_file, t, forward_t=validation_data.num_inference_steps, preview=preview)
             print("save file", out_file)
 
     del pipeline
