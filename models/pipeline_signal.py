@@ -168,6 +168,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         # Repeat the image latents for each frame so we can concatenate them with the noise
         # image_latents [batch, channels, height, width] ->[batch, num_frames, channels, height, width]
         image_latents = image_latents.unsqueeze(1).repeat(1, num_frames, 1, 1, 1)
+        print("image_latents", image_latents.size())
         # mask = repeat(mask, '1 h w -> 2 f 1 h w', f=num_frames)
         # 5. Get Added Time IDs
         added_time_ids = self._get_add_time_ids(
@@ -198,6 +199,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
             generator,
             latents,
         )
+        print("latents", latents.size())
 
         # 7. Prepare guidance scale
         guidance_scale = torch.linspace(min_guidance_scale, max_guidance_scale, num_frames).unsqueeze(0)
@@ -207,7 +209,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
 
         self._guidance_scale = guidance_scale
         # signal
-        signal_values = signal.float()  # [FPS, 512]
+        signal_values = signal.float().half()  # [FPS, 512]
 
         signal_values = torch.nan_to_num(signal_values, nan=0.0)
         signal_values = signal_values[0:num_frames, :]
@@ -226,7 +228,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         signal_values_resized = rearrange(signal_values, 'b f c-> b (f c)', b=batch_size)
 
         # print("signal_values_resized", signal_values.size())
-        signal_embeddings = signal_encoder(signal_values_resized).half().to(latents.device)
+        signal_embeddings = signal_encoder(signal_values_resized).to(latents.device)
         signal_embeddings = signal_embeddings.reshape(batch_size, 1, -1)
         # print("signal_embeddings", signal_embeddings.size())
 
@@ -236,8 +238,11 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         signal_embeddings2 = signal_encoder2(signal_values)
         # print("signal_values", signal_values.size())
         # print("signal_embeddings2", signal_embeddings2.size())
-        signal_embeddings2 = rearrange(signal_embeddings2, 'b f (c h w)-> b f c h w', b=batch_size, c=1,
-                                       h=latents.size(-2), w=latents.size(-1))  # [B, FPS, 32]
+        print("signal_embeddings2", signal_embeddings2.size())
+        # image_latents torch.Size([2, 25, 4, 56, 72])
+        # latents torch.Size([1, 25, 4, 56, 72])
+        # signal_embeddings2 torch.Size([1, 25, 4096])
+        signal_embeddings2 = rearrange(signal_embeddings2, 'b f (c h w)-> b f c h w', b=batch_size, c=1, h=latents.size(-2), w=latents.size(-1))  # [B, FPS, 32]
         # print("after rearrange2: ", signal_embeddings2.size()) # after rearrange2:  torch.Size([2, 25, 1, 64, 64])
 
         # signal_embeddings = signal_embeddings.reshape(signal_embeddings.size(0), 1, -1)

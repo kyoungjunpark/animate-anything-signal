@@ -100,9 +100,13 @@ def load_primary_models(pretrained_model_path, eval=False):
         pipeline = StableVideoDiffusionPipeline.from_pretrained(pretrained_model_path)
     fps = 25
     CHIRP_LEN = 512
-    signal_encoder = LatentSignalEncoder(input_dim=fps * CHIRP_LEN, output_dim=1024)
+    encoder_hidden_dim = 1024
 
-    signal_encoder2 = LatentSignalEncoder(output_dim=60 * 60)
+    signal_encoder = LatentSignalEncoder(input_dim=fps * CHIRP_LEN, output_dim=encoder_hidden_dim)
+    input_latents_dim1 = 64
+    input_latents_dim2 = 64
+
+    signal_encoder2 = LatentSignalEncoder(output_dim=input_latents_dim1 * input_latents_dim2)
 
     return pipeline, None, pipeline.feature_extractor, pipeline.scheduler, pipeline.image_processor, \
            pipeline.image_encoder, pipeline.vae, pipeline.unet, signal_encoder, signal_encoder2
@@ -432,7 +436,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
                                condition_latent / vae.config.scaling_factor], dim=2)
 
     # Signal embedding
-    signal_values = batch['signal_values'].float()  # [B, FPS, 512]
+    signal_values = batch['signal_values'].float().half()  # [B, FPS, 512]
     signal_values = torch.nan_to_num(signal_values, nan=0.0)
 
     # signal_encoder = LatentSignalEncoder(input_dim=signal_values.size(-1) * signal_values.size(-2), output_dim=1024).to(device)
@@ -448,7 +452,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
 
     signal_values_resized = rearrange(signal_values, 'b f c-> b (f c)')
     # print(signal_values.size())
-    signal_embeddings = signal_encoder(signal_values_resized).half().to(latents.device)
+    signal_embeddings = signal_encoder(signal_values_resized).to(latents.device)
     signal_embeddings = signal_embeddings.reshape(bsz, 1, -1)
 
     # signal_embeddings = rearrange(signal_embeddings, '(b f) c-> b f c', b=bsz)  # [B, FPS, 32]
@@ -820,23 +824,13 @@ def eval(pipeline, vae_processor, sig1, sig2, validation_data, out_file, index, 
     if pimg.mode == "RGBA":
         pimg = pimg.convert("RGB")
     width, height = pimg.size
-    scale = math.sqrt(width * height / (validation_data.height * validation_data.width))
-    block_size = 64
-    validation_data.height = round(height / scale / block_size) * block_size
-    validation_data.width = round(width / scale / block_size) * block_size
+    # scale = math.sqrt(width * height / (validation_data.height * validation_data.width))
+    # block_size = 64
+    # validation_data.height = round(height / scale / block_size) * block_size
+    # validation_data.width = round(width / scale / block_size) * block_size
 
-    mask_path = validation_data.prompt_image.split('.')[0] + '_label.jpg'
-    if os.path.exists(mask_path):
-        mask = Image.open(mask_path)
-        mask = mask.resize((validation_data.width, validation_data.height))
-        np_mask = np.array(mask)
-        if len(np_mask.shape) == 3:
-            np_mask = np_mask[:, :, 0]
-        np_mask[np_mask != 0] = 255
-    else:
-        np_mask = np.ones([validation_data.height, validation_data.width], dtype=np.uint8) * 255
-    out_mask_path = os.path.splitext(out_file)[0] + "_mask.jpg"
-    Image.fromarray(np_mask).save(out_mask_path)
+    # out_mask_path = os.path.splitext(out_file)[0] + "_mask.jpg"
+    # Image.fromarray(np_mask).save(out_mask_path)
     motion_mask = pipeline.unet.config.in_channels == 9
 
     # prepare inital latents
