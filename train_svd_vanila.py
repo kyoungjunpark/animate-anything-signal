@@ -635,7 +635,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("text2video-fine-tune")
+        accelerator.init_trackers("svd_vanila")
 
     # Train!
     total_batch_size = train_batch_size * accelerator.num_processes * gradient_accumulation_steps
@@ -674,7 +674,6 @@ def main(
             is_checkpoint=True,
             save_pretrained_model=save_pretrained_model
         )
-        wandb.init(project="valina_svd")
 
     for epoch in range(first_epoch, num_train_epochs):
         train_loss = 0.0

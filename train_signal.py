@@ -54,7 +54,6 @@ already_printed_trainables = False
 
 logger = get_logger(__name__, log_level="INFO")
 
-wandb.init(project="signal_svd")
 
 wandb.require("core")
 
@@ -523,7 +522,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("text2video-fine-tune")
+        accelerator.init_trackers("animate_signal")
 
     # Train!
     total_batch_size = train_batch_size * accelerator.num_processes * gradient_accumulation_steps

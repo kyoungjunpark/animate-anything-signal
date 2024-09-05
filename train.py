@@ -537,7 +537,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("text2video-fine-tune")
+        accelerator.init_trackers("animate_only")
 
     # Train!
     total_batch_size = train_batch_size * accelerator.num_processes * gradient_accumulation_steps
