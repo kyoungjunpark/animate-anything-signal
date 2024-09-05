@@ -113,7 +113,6 @@ def get_frame_signal_batch(signal_path, max_frames, sample_fps, vr, transform):
     native_fps = vr.get_avg_fps()
     max_range = len(vr)
     frame_step = max(1, round(native_fps / sample_fps))
-    print("frame_step is ", frame_step)
     frame_range = range(0, max_range, frame_step)
     if len(frame_range) < max_frames:
         frame_range = np.linspace(0, max_range - 1, max_frames).astype(int)
