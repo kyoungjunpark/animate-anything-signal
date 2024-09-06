@@ -86,7 +86,7 @@ def load_primary_models(pretrained_model_path, eval=False):
                                                                 variant='fp16')
     else:
         pipeline = StableVideoDiffusionPipeline.from_pretrained(pretrained_model_path)
-    fps = 25
+    fps = 20
     CHIRP_LEN = 512
     encoder_hidden_dim = 1024
 
@@ -446,12 +446,19 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
 
     # signal_embeddings = rearrange(signal_embeddings, '(b f) c-> b f c', b=bsz)  # [B, FPS, 32]
     # print("after rearrange: ", signal_embeddings.size())  # torch.Size([2, 25 -> 1, 1024]) torch.Size([50, 1, 1024])
-
+    # print("signal_values", signal_values.size())
     signal_embeddings2 = signal_encoder2(signal_values)
-    signal_embeddings2 = rearrange(signal_embeddings2, 'b f (c h w)-> b f c h w', b=bsz, c=1,
-                                   h=100, w=100)  # [B, FPS, 32]
-    signal_embeddings2 = F.interpolate(signal_embeddings2, size=(input_latents.size(-2), input_latents.size(-1)), mode='bilinear')
+    # print("signal_embeddings2", signal_embeddings2.size())
 
+    signal_embeddings2 = rearrange(signal_embeddings2, 'b f (c h w)-> (b f) c h w', c=1,
+                                   h=100, w=100)  # [B, FPS, 32]
+    # print("after signal_embeddings2", signal_embeddings2.size())
+    # signal_values torch.Size([2, 25, 512])
+    # signal_embeddings2 torch.Size([2, 25, 10000])
+    # after signal_embeddings2 torch.Size([2, 25, 1, 100, 100])
+    signal_embeddings2 = F.interpolate(signal_embeddings2, size=(input_latents.size(-2), input_latents.size(-1)), mode='bilinear')
+    signal_embeddings2 = rearrange(signal_embeddings2, '(b f) c h w-> b f c h w', b=bsz)  # [B, FPS, 32]
+    # print("after interpolate", signal_embeddings2.size())
     # print("after rearrange2: ", signal_embeddings2.size()) # after rearrange2:  torch.Size([2, 25, 1, 64, 64])
 
     # signal_embeddings = signal_embeddings.reshape(signal_embeddings.size(0), 1, -1)
@@ -675,7 +682,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("svd_with_signal")
+        accelerator.init_trackers("svd_with_signal_v2")
         wandb.require("core")
 
     # Train!
