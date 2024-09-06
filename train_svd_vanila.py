@@ -662,7 +662,7 @@ def main(
         unet.eval()
         text_encoder.eval()
     if accelerator.is_main_process:
-        print("Save it!!!!!!!!!")
+        print("Save Test")
         save_pipe(
             pretrained_model_path,
             global_step,
@@ -791,42 +791,47 @@ def eval(pipeline, vae_processor, validation_data, out_file, index, forward_t=25
 
     # prepare inital latents
     initial_latents = None
-    with torch.no_grad():
-        if motion_mask:
-            h, w = validation_data.height // pipeline.vae_scale_factor, validation_data.width // pipeline.vae_scale_factor
-            initial_latents = torch.randn([1, validation_data.num_frames, 4, h, w], dtype=dtype, device=device)
-            mask = T.ToTensor()(np_mask).to(dtype).to(device)
-            mask = T.Resize([h, w], antialias=False)(mask)
-            video_frames = MaskStableVideoDiffusionPipeline.__call__(
-                pipeline,
-                image=pimg,
-                width=validation_data.width,
-                height=validation_data.height,
-                num_frames=validation_data.num_frames,
-                num_inference_steps=validation_data.num_inference_steps,
-                decode_chunk_size=validation_data.decode_chunk_size,
-                fps=validation_data.fps,
-                motion_bucket_id=validation_data.motion_bucket_id,
-                mask=mask
-            ).frames[0]
-        else:
-            video_frames = pipeline(
-                image=pimg,
-                width=validation_data.width,
-                height=validation_data.height,
-                num_frames=validation_data.num_frames,
-                num_inference_steps=validation_data.num_inference_steps,
-                fps=validation_data.fps,
-                decode_chunk_size=validation_data.decode_chunk_size,
-                motion_bucket_id=validation_data.motion_bucket_id,
-            ).frames[0]
+    for image in zip(validation_data.prompt_image):
+        pimg = Image.open(image)
+        if pimg.mode == "RGBA":
+            pimg = pimg.convert("RGB")
 
-    if preview:
-        fps = validation_data.get('fps', 8)
-        imageio.mimwrite(out_file, video_frames, duration=int(1000 / fps), loop=0)
-        imageio.mimwrite(out_file.replace('.gif', '.mp4'), video_frames, fps=fps)
-        wandb.log({"Generated mp4": wandb.Video(out_file.replace('.gif', '.mp4'),
-                                                caption=out_file.replace('.gif', '.mp4'), fps=fps, format="mp4")})
+        with torch.no_grad():
+            if motion_mask:
+                h, w = validation_data.height // pipeline.vae_scale_factor, validation_data.width // pipeline.vae_scale_factor
+                initial_latents = torch.randn([1, validation_data.num_frames, 4, h, w], dtype=dtype, device=device)
+                mask = T.ToTensor()(np_mask).to(dtype).to(device)
+                mask = T.Resize([h, w], antialias=False)(mask)
+                video_frames = MaskStableVideoDiffusionPipeline.__call__(
+                    pipeline,
+                    image=pimg,
+                    width=validation_data.width,
+                    height=validation_data.height,
+                    num_frames=validation_data.num_frames,
+                    num_inference_steps=validation_data.num_inference_steps,
+                    decode_chunk_size=validation_data.decode_chunk_size,
+                    fps=validation_data.fps,
+                    motion_bucket_id=validation_data.motion_bucket_id,
+                    mask=mask
+                ).frames[0]
+            else:
+                video_frames = pipeline(
+                    image=pimg,
+                    width=validation_data.width,
+                    height=validation_data.height,
+                    num_frames=validation_data.num_frames,
+                    num_inference_steps=validation_data.num_inference_steps,
+                    fps=validation_data.fps,
+                    decode_chunk_size=validation_data.decode_chunk_size,
+                    motion_bucket_id=validation_data.motion_bucket_id,
+                ).frames[0]
+
+        if preview:
+            fps = validation_data.get('fps', 8)
+            imageio.mimwrite(out_file, video_frames, duration=int(1000 / fps), loop=0)
+            imageio.mimwrite(out_file.replace('.gif', '.mp4'), video_frames, fps=fps)
+            wandb.log({"Generated mp4": wandb.Video(out_file.replace('.gif', '.mp4'),
+                                                    caption=out_file.replace('.gif', '.mp4'), fps=fps, format="mp4")})
 
     return 0
 

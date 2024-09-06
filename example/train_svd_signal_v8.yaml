@@ -172,8 +172,12 @@ validation_data:
   # A custom prompt that is different from your training dataset. 
   prompt: "Test"
 
-  prompt_image: "example/frame1.jpg"
-  signal: "example/frame1.pt"
+  prompt_image: ["example/frame1.jpg", "example/frame2.jpg","example/frame3.jpg","example/frame4.jpg",
+    "example/frame5.jpg","example/frame6.jpg","example/frame7.jpg","example/frame8.jpg","example/frame9.jpg",
+    "example/frame10.jpg","example/frame11.jpg","example/frame12.jpg","example/frame13.jpg"]
+  signal: ["example/frame1.pt", "example/frame2.pt","example/frame3.pt","example/frame4.pt",
+    "example/frame5.pt","example/frame6.pt","example/frame7.pt","example/frame8.pt","example/frame9.pt",
+    "example/frame10.pt","example/frame11.pt","example/frame12.pt","example/frame13.pt"]
 
   # Whether or not to sample preview during training (Requires more VRAM).
   sample_preview: True
@@ -228,7 +232,7 @@ max_train_steps: 10000
 checkpointing_steps: 1000
 
 # How many steps to do for validation if sample_preview is enabled.
-validation_steps: 100
+validation_steps: 1000
 
 # Which modules we want to unfreeze for the UNET. Advanced usage.
 trainable_modules:

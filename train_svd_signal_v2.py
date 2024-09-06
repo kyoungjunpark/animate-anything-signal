@@ -345,8 +345,16 @@ def save_pipe(
     pipeline = StableVideoDiffusionPipeline.from_pretrained(
         path, unet=unet_out).to(torch_dtype=torch.float32)
 
+    sig1_out = copy.deepcopy(sig1)
+
+    sig2_out = copy.deepcopy(sig2)
+
     if save_pretrained_model:
         pipeline.save_pretrained(save_path)
+        signal_save_path = save_path + "/signal/"
+        os.makedirs(signal_save_path, exist_ok=True)
+        torch.save(sig1_out.state_dict(), signal_save_path + 'sig1.pth')
+        torch.save(sig2_out.state_dict(), signal_save_path + 'sig2.pth')
 
     logger.info(f"Saved model at {save_path} on step {global_step}")
 
@@ -710,7 +718,7 @@ def main(
         unet.eval()
         text_encoder.eval()
     if accelerator.is_main_process:
-        print("Save it!!!!!!!!!")
+        print("Save Test")
         save_pipe(
             pretrained_model_path,
             global_step,
@@ -718,8 +726,8 @@ def main(
             accelerator.unwrap_model(unet),
             accelerator.unwrap_model(text_encoder),
             vae,
-            sig1,
-            sig2,
+            accelerator.unwrap_model(sig1),
+            accelerator.unwrap_model(sig2),
             output_dir,
             is_checkpoint=True,
             save_pretrained_model=save_pretrained_model
@@ -768,8 +776,8 @@ def main(
                         accelerator.unwrap_model(unet),
                         accelerator.unwrap_model(text_encoder),
                         vae,
-                        sig1,
-                        sig2,
+                        accelerator.unwrap_model(sig1),
+                        accelerator.unwrap_model(sig2),
                         output_dir,
                         is_checkpoint=True,
                         save_pretrained_model=save_pretrained_model
@@ -802,8 +810,8 @@ def main(
             accelerator.unwrap_model(unet),
             accelerator.unwrap_model(text_encoder),
             vae,
-            sig1,
-            sig2,
+            accelerator.unwrap_model(sig1),
+            accelerator.unwrap_model(sig2),
             output_dir,
             is_checkpoint=False,
             save_pretrained_model=save_pretrained_model
@@ -820,12 +828,6 @@ def eval(pipeline, vae_processor, sig1, sig2, validation_data, out_file, index, 
     diffusion_scheduler.set_timesteps(validation_data.num_inference_steps, device=device)
 
     # prompt = validation_data.prompt
-    signal = torch.load(validation_data.signal, map_location="cuda:0", weights_only=True).to(dtype).to(device)
-
-    pimg = Image.open(validation_data.prompt_image)
-    if pimg.mode == "RGBA":
-        pimg = pimg.convert("RGB")
-    width, height = pimg.size
     # scale = math.sqrt(width * height / (validation_data.height * validation_data.width))
     # block_size = 64
     # validation_data.height = round(height / scale / block_size) * block_size
@@ -837,45 +839,51 @@ def eval(pipeline, vae_processor, sig1, sig2, validation_data, out_file, index, 
 
     # prepare inital latents
     initial_latents = None
-    with torch.no_grad():
-        if motion_mask:
-            # h, w = validation_data.height // pipeline.vae_scale_factor, validation_data.width // pipeline.vae_scale_factor
-            # initial_latents = torch.randn([1, validation_data.num_frames, 4, h, w], dtype=dtype, device=device)
-            # mask = T.ToTensor()(np_mask).to(dtype).to(device)
-            # mask = T.Resize([h, w], antialias=False)(mask)
-            video_frames = MaskStableVideoDiffusionPipeline.__call__(
-                pipeline,
-                image=pimg,
-                width=validation_data.width,
-                height=validation_data.height,
-                num_frames=validation_data.num_frames,
-                num_inference_steps=validation_data.num_inference_steps,
-                decode_chunk_size=validation_data.decode_chunk_size,
-                fps=validation_data.fps,
-                motion_bucket_id=validation_data.motion_bucket_id,
-                mask=None,
-                signal=signal,
-                sig1=sig1,
-                sig2=sig2
-            ).frames[0]
-        else:
-            video_frames = pipeline(
-                image=pimg,
-                width=validation_data.width,
-                height=validation_data.height,
-                num_frames=validation_data.num_frames,
-                num_inference_steps=validation_data.num_inference_steps,
-                fps=validation_data.fps,
-                decode_chunk_size=validation_data.decode_chunk_size,
-                motion_bucket_id=validation_data.motion_bucket_id,
-            ).frames[0]
+    for image, signal in zip(validation_data.prompt_image, validation_data.signal):
+        pimg = Image.open(image)
+        if pimg.mode == "RGBA":
+            pimg = pimg.convert("RGB")
+        signal = torch.load(signal, map_location="cuda:0", weights_only=True).to(dtype).to(device)
 
-    if preview:
-        fps = validation_data.get('fps', 8)
-        imageio.mimwrite(out_file, video_frames, duration=int(1000 / fps), loop=0)
-        imageio.mimwrite(out_file.replace('.gif', '.mp4'), video_frames, fps=fps)
-        wandb.log({"Generated mp4": wandb.Video(out_file.replace('.gif', '.mp4'),
-                                                caption=out_file.replace('.gif', '.mp4'), fps=fps, format="mp4")})
+        with torch.no_grad():
+            if motion_mask:
+                # h, w = validation_data.height // pipeline.vae_scale_factor, validation_data.width // pipeline.vae_scale_factor
+                # initial_latents = torch.randn([1, validation_data.num_frames, 4, h, w], dtype=dtype, device=device)
+                # mask = T.ToTensor()(np_mask).to(dtype).to(device)
+                # mask = T.Resize([h, w], antialias=False)(mask)
+                video_frames = MaskStableVideoDiffusionPipeline.__call__(
+                    pipeline,
+                    image=pimg,
+                    width=validation_data.width,
+                    height=validation_data.height,
+                    num_frames=validation_data.num_frames,
+                    num_inference_steps=validation_data.num_inference_steps,
+                    decode_chunk_size=validation_data.decode_chunk_size,
+                    fps=validation_data.fps,
+                    motion_bucket_id=validation_data.motion_bucket_id,
+                    mask=None,
+                    signal=signal,
+                    sig1=sig1,
+                    sig2=sig2
+                ).frames[0]
+            else:
+                video_frames = pipeline(
+                    image=pimg,
+                    width=validation_data.width,
+                    height=validation_data.height,
+                    num_frames=validation_data.num_frames,
+                    num_inference_steps=validation_data.num_inference_steps,
+                    fps=validation_data.fps,
+                    decode_chunk_size=validation_data.decode_chunk_size,
+                    motion_bucket_id=validation_data.motion_bucket_id,
+                ).frames[0]
+
+        if preview:
+            fps = validation_data.get('fps', 8)
+            imageio.mimwrite(out_file, video_frames, duration=int(1000 / fps), loop=0)
+            imageio.mimwrite(out_file.replace('.gif', '.mp4'), video_frames, fps=fps)
+            wandb.log({"Generated mp4": wandb.Video(out_file.replace('.gif', '.mp4'),
+                                                    caption=out_file.replace('.gif', '.mp4'), fps=fps, format="mp4")})
 
     return 0
 

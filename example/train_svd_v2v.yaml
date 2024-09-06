@@ -232,7 +232,7 @@ max_train_steps: 10000
 checkpointing_steps: 1000
 
 # How many steps to do for validation if sample_preview is enabled.
-validation_steps: 100
+validation_steps: 1000
 
 # Which modules we want to unfreeze for the UNET. Advanced usage.
 trainable_modules:

@@ -548,7 +548,7 @@ def main(
         unet.eval()
 
     if accelerator.is_main_process:
-        print("Save it!!!!!!!!!")
+        print("Save Test")
         save_pipe(
             pretrained_model_path,
             global_step,

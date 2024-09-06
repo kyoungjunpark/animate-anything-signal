@@ -210,9 +210,13 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         signal_values = signal.float().half()  # [FPS, 512]
 
         signal_values = torch.nan_to_num(signal_values, nan=0.0)
-        frame_step = 3
+        target_fps = 20
+        native_fps = 20
+        sample_fps = num_frames
+        frame_step = max(1, round(native_fps / sample_fps))
+
         frame_range = range(0, signal_values.size(0), frame_step)
-        frame_range_indices = list(frame_range)[:25]
+        frame_range_indices = list(frame_range)[:target_fps]
 
         signal_values = signal_values[frame_range_indices, :]
 
@@ -229,7 +233,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         # [B, FPS, 512] -> [B * FPS, 512]
         signal_values_resized = rearrange(signal_values, 'b f c-> b (f c)', b=batch_size)
 
-        # print("signal_values_resized", signal_values.size())
+        # print("signal_values_resized", signal_values_resized.size())
         signal_embeddings = signal_encoder(signal_values_resized).to(latents.device)
         signal_embeddings = signal_embeddings.reshape(batch_size, 1, -1)
         # print("signal_embeddings", signal_embeddings.size())
@@ -244,11 +248,11 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         # image_latents torch.Size([2, 25, 4, 56, 72])
         # latents torch.Size([1, 25, 4, 56, 72])
         # signal_embeddings2 torch.Size([1, 25, 4096])
-        signal_embeddings2 = rearrange(signal_embeddings2, 'b f (c h w)-> b f c h w', b=batch_size, c=1, h=100, w=100)  # [B, FPS, 32]
+        signal_embeddings2 = rearrange(signal_embeddings2, 'b f (c h w)-> (b f) c h w', b=batch_size, c=1, h=100, w=100)  # [B, FPS, 32]
         # print("after rearrange2: ", signal_embeddings2.size()) # after rearrange2:  torch.Size([2, 25, 1, 64, 64])
-        signal_embeddings2 = F.interpolate(signal_embeddings2, size=(input_latents.size(-2), input_latents.size(-1)),
+        signal_embeddings2 = F.interpolate(signal_embeddings2, size=(latents.size(-2), latents.size(-1)),
                                            mode='bilinear')
-        signal_embeddings2 = rearrange(signal_embeddings2, '(b f) c h w-> b f c h w', b=bsz)  # [B, FPS, 32]
+        signal_embeddings2 = rearrange(signal_embeddings2, '(b f) c h w-> b f c h w', b=batch_size)  # [B, FPS, 32]
 
         # signal_embeddings = signal_embeddings.reshape(signal_embeddings.size(0), 1, -1)
         # signal_resize_encoder = SignalResizeEncoder(input_dim=signal_embeddings.size(-1), output_dim=1024).half().to(device)
