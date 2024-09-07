@@ -869,10 +869,11 @@ def eval(pipeline, vae_processor, sig1, sig2, validation_data, out_file, index, 
 
         if preview:
             fps = validation_data.get('fps', 8)
-            imageio.mimwrite(out_file, video_frames, duration=int(1000 / fps), loop=0)
-            imageio.mimwrite(out_file.replace('.gif', '.mp4'), video_frames, fps=fps)
-            wandb.log({"Generated mp4": wandb.Video(out_file.replace('.gif', '.mp4'),
-                                                    caption=out_file.replace('.gif', '.mp4'), fps=fps, format="mp4")})
+            imageio.mimwrite(target_file, video_frames, duration=int(1000 / fps), loop=0)
+            imageio.mimwrite(target_file.replace('.gif', '.mp4'), video_frames, fps=fps)
+            resized_frames = [cv2.resize(frame, (125, 125)) for frame in video_frames]
+            wandb.log({image: wandb.Video(resized_frames,
+                                                    caption=target_file.replace('.gif', '.mp4'), fps=fps, format="mp4")})
 
     return 0
 

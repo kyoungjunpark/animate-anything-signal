@@ -792,6 +792,14 @@ def eval(pipeline, vae_processor, validation_data, out_file, index, forward_t=25
     # prepare inital latents
     initial_latents = None
     for image in zip(validation_data.prompt_image):
+        image_replaced = image.replace("frame", str(index)+"_frame").replace('.jpg', '.gif')
+        target_file = out_file + image_replaced
+        # print(out_file)
+        # print(image_replaced)
+        directory = os.path.dirname(target_file)
+        # Create the directory if it doesn't exist
+        os.makedirs(directory, exist_ok=True)
+
         pimg = Image.open(image)
         if pimg.mode == "RGBA":
             pimg = pimg.convert("RGB")
@@ -828,10 +836,12 @@ def eval(pipeline, vae_processor, validation_data, out_file, index, forward_t=25
 
         if preview:
             fps = validation_data.get('fps', 8)
-            imageio.mimwrite(out_file, video_frames, duration=int(1000 / fps), loop=0)
-            imageio.mimwrite(out_file.replace('.gif', '.mp4'), video_frames, fps=fps)
-            wandb.log({"Generated mp4": wandb.Video(out_file.replace('.gif', '.mp4'),
-                                                    caption=out_file.replace('.gif', '.mp4'), fps=fps, format="mp4")})
+            imageio.mimwrite(target_file, video_frames, duration=int(1000 / fps), loop=0)
+            imageio.mimwrite(target_file.replace('.gif', '.mp4'), video_frames, fps=fps)
+            resized_frames = [cv2.resize(frame, (125, 125)) for frame in video_frames]
+            wandb.log({image: wandb.Video(resized_frames,
+                                                    caption=target_file.replace('.gif', '.mp4'), fps=fps, format="mp4")})
+
 
     return 0
 

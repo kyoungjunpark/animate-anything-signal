@@ -789,7 +789,7 @@ def main(
                         with accelerator.autocast():
                             curr_dataset_name = batch['dataset'][0]
                             save_filename = f"{global_step}_dataset-{curr_dataset_name}"
-                            out_file = f"{output_dir}/samples/{save_filename}.gif"
+                            out_file = f"{output_dir}/samples/"
                             eval(pipeline, vae_processor, sig1, sig2, validation_data, out_file, global_step)
                             logger.info(f"Saved a new sample to {out_file}")
 
@@ -839,7 +839,18 @@ def eval(pipeline, vae_processor, sig1, sig2, validation_data, out_file, index, 
 
     # prepare inital latents
     initial_latents = None
+
     for image, signal in zip(validation_data.prompt_image, validation_data.signal):
+        # print(out_file)
+        # print(image)
+        image_replaced = image.replace("frame", str(index)+"_frame").replace('.jpg', '.gif')
+        target_file = out_file + image_replaced
+        # print(out_file)
+        # print(image_replaced)
+        directory = os.path.dirname(target_file)
+        # Create the directory if it doesn't exist
+        os.makedirs(directory, exist_ok=True)
+
         pimg = Image.open(image)
         if pimg.mode == "RGBA":
             pimg = pimg.convert("RGB")
@@ -880,10 +891,11 @@ def eval(pipeline, vae_processor, sig1, sig2, validation_data, out_file, index, 
 
         if preview:
             fps = validation_data.get('fps', 8)
-            imageio.mimwrite(out_file, video_frames, duration=int(1000 / fps), loop=0)
-            imageio.mimwrite(out_file.replace('.gif', '.mp4'), video_frames, fps=fps)
-            wandb.log({"Generated mp4": wandb.Video(out_file.replace('.gif', '.mp4'),
-                                                    caption=out_file.replace('.gif', '.mp4'), fps=fps, format="mp4")})
+            imageio.mimwrite(target_file, video_frames, duration=int(1000 / fps), loop=0)
+            imageio.mimwrite(target_file.replace('.gif', '.mp4'), video_frames, fps=fps)
+            resized_frames = [cv2.resize(frame, (125, 125)) for frame in video_frames]
+            wandb.log({image: wandb.Video(resized_frames,
+                                                    caption=target_file.replace('.gif', '.mp4'), fps=fps, format="mp4")})
 
     return 0
 
