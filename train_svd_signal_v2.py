@@ -893,7 +893,8 @@ def eval(pipeline, vae_processor, sig1, sig2, validation_data, out_file, index, 
             fps = validation_data.get('fps', 8)
             imageio.mimwrite(target_file, video_frames, duration=int(1000 / fps), loop=0)
             imageio.mimwrite(target_file.replace('.gif', '.mp4'), video_frames, fps=fps)
-            resized_frames = [cv2.resize(frame, (125, 125)) for frame in video_frames]
+            resized_frames = [np.array(cv2.resize(frame, (125, 125))) for frame in np.array(video_frames)]
+            resized_frames = np.array(resized_frames)
             wandb.log({image: wandb.Video(resized_frames,
                                                     caption=target_file.replace('.gif', '.mp4'), fps=fps, format="mp4")})
 

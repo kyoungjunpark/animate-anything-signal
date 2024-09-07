@@ -23,3 +23,5 @@ azure-core
 isodate
 wandb
 cffi
+moviepy
+imageio
