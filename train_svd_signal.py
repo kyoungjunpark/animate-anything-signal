@@ -779,7 +779,7 @@ def main(
                         with accelerator.autocast():
                             curr_dataset_name = batch['dataset'][0]
                             save_filename = f"{global_step}_dataset-{curr_dataset_name}"
-                            out_file = f"{output_dir}/samples/{save_filename}.gif"
+                            out_file = f"{output_dir}/samples/"
                             eval(pipeline, vae_processor, sig1, sig2, validation_data, out_file, global_step)
                             logger.info(f"Saved a new sample to {out_file}")
 
