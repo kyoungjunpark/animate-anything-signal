@@ -829,6 +829,14 @@ def eval(pipeline, vae_processor, sig1, sig2, validation_data, out_file, index, 
     # prepare inital latents
     initial_latents = None
     for image, signal in zip(validation_data.prompt_image, validation_data.signal):
+        image_replaced = image.replace("frame", str(index)+"_frame").replace('.jpg', '.gif')
+        target_file = out_file + image_replaced
+        # print(out_file)
+        # print(image_replaced)
+        directory = os.path.dirname(target_file)
+        # Create the directory if it doesn't exist
+        os.makedirs(directory, exist_ok=True)
+
         pimg = Image.open(image)
         if pimg.mode == "RGBA":
             pimg = pimg.convert("RGB")
