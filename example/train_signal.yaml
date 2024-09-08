@@ -123,7 +123,7 @@ train_data:
   sample_start_idx: 1
   fps: 8
   n_sample_frames: 20
-  json_path: '/home/aiscuser/animate-anything-signal/example/signal_blip.json'
+  json_path: '/home/aiscuser/animate-anything-signal/example/signal_2_4_vlip.json'
 
 # Validation data parameters.
 validation_data:
