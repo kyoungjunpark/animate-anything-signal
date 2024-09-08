@@ -178,8 +178,8 @@ validation_data:
   # signal: ["example/frame1.pt", "example/frame2.pt","example/frame3.pt","example/frame4.pt",
   #   "example/frame5.pt","example/frame6.pt","example/frame7.pt","example/frame8.pt","example/frame9.pt",
   #   "example/frame10.pt","example/frame11.pt","example/frame12.pt","example/frame13.pt"]
-  prompt_image: ["example/frame1.jpg", "example/frame5.jpg","example/frame6.jpg", "example/frame9.jpg", "example/frame12.jpg"]
-  signal: ["example/frame1.pt", "example/frame5.pt","example/frame6.pt", "example/frame9.pt", "example/frame12.pt"]
+  prompt_image: ["example/frame1.jpg", "example/frame5.jpg","example/frame6.jpg", "example/frame7.jpg", "example/frame8.jpg", "example/frame9.jpg", "example/frame12.jpg"]
+  signal: ["example/frame1.pt", "example/frame5.pt", "example/frame6.pt", "example/frame7.jpg", "example/frame8.jpg", "example/frame9.pt", "example/frame12.pt"]
 
   # Whether or not to sample preview during training (Requires more VRAM).
   sample_preview: True
