@@ -729,7 +729,7 @@ def main(
                         with accelerator.autocast():
                             curr_dataset_name = batch['dataset'][0]
                             save_filename = f"{global_step}_dataset-{curr_dataset_name}"
-                            out_file = f"{output_dir}/samples/{save_filename}.gif"
+                            out_file = f"{output_dir}/samples/"
                             eval(pipeline, vae_processor, validation_data, out_file, global_step)
                             logger.info(f"Saved a new sample to {out_file}")
 
@@ -766,25 +766,8 @@ def eval(pipeline, vae_processor, validation_data, out_file, index, forward_t=25
     diffusion_scheduler.set_timesteps(validation_data.num_inference_steps, device=device)
 
     prompt = validation_data.prompt
-    pimg = Image.open(validation_data.prompt_image)
-    if pimg.mode == "RGBA":
-        pimg = pimg.convert("RGB")
-    width, height = pimg.size
-    scale = math.sqrt(width * height / (validation_data.height * validation_data.width))
-    block_size = 64
-    validation_data.height = round(height / scale / block_size) * block_size
-    validation_data.width = round(width / scale / block_size) * block_size
 
-    mask_path = validation_data.prompt_image.split('.')[0] + '_label.jpg'
-    if os.path.exists(mask_path):
-        mask = Image.open(mask_path)
-        mask = mask.resize((validation_data.width, validation_data.height))
-        np_mask = np.array(mask)
-        if len(np_mask.shape) == 3:
-            np_mask = np_mask[:, :, 0]
-        np_mask[np_mask != 0] = 255
-    else:
-        np_mask = np.ones([validation_data.height, validation_data.width], dtype=np.uint8) * 255
+    np_mask = np.ones([validation_data.height, validation_data.width], dtype=np.uint8) * 255
     out_mask_path = os.path.splitext(out_file)[0] + "_mask.jpg"
     Image.fromarray(np_mask).save(out_mask_path)
     motion_mask = pipeline.unet.config.in_channels == 9
@@ -839,9 +822,8 @@ def eval(pipeline, vae_processor, validation_data, out_file, index, forward_t=25
             imageio.mimwrite(target_file, video_frames, duration=int(1000 / fps), loop=0)
             imageio.mimwrite(target_file.replace('.gif', '.mp4'), video_frames, fps=fps)
             # resized_frames = [cv2.resize(frame, (125, 125)) for frame in video_frames]
-            wandb.log({image: wandb.Video(target_file,
-                                                    caption=target_file.replace('.gif', '.mp4'), fps=fps, format="mp4")})
-
+            wandb.log({image: wandb.Video(target_file.replace('.gif', '.mp4'),
+                                          caption=target_file.replace('.gif', '.mp4'), fps=fps, format="mp4")})
 
     return 0
 
