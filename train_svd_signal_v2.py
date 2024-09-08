@@ -86,7 +86,7 @@ def load_primary_models(pretrained_model_path, eval=False):
                                                                 variant='fp16')
     else:
         pipeline = StableVideoDiffusionPipeline.from_pretrained(pretrained_model_path)
-    fps = 20
+    fps = 25
     CHIRP_LEN = 512
     encoder_hidden_dim = 1024
 

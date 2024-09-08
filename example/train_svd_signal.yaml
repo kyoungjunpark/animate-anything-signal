@@ -231,7 +231,7 @@ train_batch_size: 2
 max_train_steps: 1000000
 
 # Saves a model every nth step.
-checkpointing_steps: 1000
+checkpointing_steps: 2500
 
 # How many steps to do for validation if sample_preview is enabled.
 validation_steps: 1000
