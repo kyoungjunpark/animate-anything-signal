@@ -784,12 +784,12 @@ def main(
 
                 if should_sample(global_step, validation_steps, validation_data) and accelerator.is_main_process:
                     if global_step == 1: print("Performing validation prompt.")
-                        with accelerator.autocast():
-                            curr_dataset_name = batch['dataset'][0]
-                            save_filename = f"{global_step}_dataset-{curr_dataset_name}"
-                            out_file = f"{output_dir}/samples/"
-                            eval(pipeline, vae_processor, sig1, sig2, validation_data, out_file, global_step)
-                            logger.info(f"Saved a new sample to {out_file}")
+                    with accelerator.autocast():
+                        curr_dataset_name = batch['dataset'][0]
+                        save_filename = f"{global_step}_dataset-{curr_dataset_name}"
+                        out_file = f"{output_dir}/samples/"
+                        eval(pipeline, vae_processor, sig1, sig2, validation_data, out_file, global_step)
+                        logger.info(f"Saved a new sample to {out_file}")
 
             logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
             accelerator.log({"training_loss": loss.detach().item()}, step=step)

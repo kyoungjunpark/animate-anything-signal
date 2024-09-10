@@ -23,7 +23,7 @@ import torch.utils.checkpoint
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.loaders import UNet2DConditionLoadersMixin
 from diffusers.utils import BaseOutput, logging
-from diffusers.activations import get_activation
+from diffusers.models.activations import get_activation
 from diffusers.models.attention_processor import (
     ADDED_KV_ATTENTION_PROCESSORS,
     CROSS_ATTENTION_PROCESSORS,
@@ -35,7 +35,7 @@ from diffusers.models.attention_processor import (
 )
 from diffusers.models.embeddings import TimestepEmbedding, Timesteps
 from diffusers.models.modeling_utils import ModelMixin
-from diffusers.models.transformer_temporal import TransformerTemporalModel
+from diffusers.models.transformers.transformer_temporal import TransformerTemporalModel
 from .unet_3d_blocks import (
     CrossAttnDownBlock3D,
     CrossAttnUpBlock3D,
