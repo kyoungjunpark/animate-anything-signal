@@ -446,9 +446,9 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     fps = signal_values.size(1)
 
     # [B, FPS, 512] -> [B * FPS, 512]
-    signal_values_resized = rearrange(signal_values, 'b f c-> b (f c)')
+    # signal_values_resized = rearrange(signal_values, 'b f c-> b (f c)')
     # print(signal_values.size())
-    signal_embeddings = signal_encoder(signal_values_resized)
+    signal_embeddings = signal_encoder(signal_values)
     signal_embeddings = signal_embeddings.reshape(bsz, 1, -1)
 
     # signal_embeddings = rearrange(signal_embeddings, '(b f) c-> b f c', b=bsz)  # [B, FPS, 32]
@@ -511,7 +511,7 @@ def main(
         train_data: Dict,
         validation_data: Dict,
         extra_train_data: list = [],
-        dataset_types: Tuple[str] = ('json'),
+        dataset_types: Tuple[str] = 'json',
         shuffle: bool = True,
         validation_steps: int = 100,
         trainable_modules: Tuple[str] = None,  # Eg: ("attn1", "attn2")
@@ -784,7 +784,6 @@ def main(
 
                 if should_sample(global_step, validation_steps, validation_data) and accelerator.is_main_process:
                     if global_step == 1: print("Performing validation prompt.")
-                    if accelerator.is_main_process:
                         with accelerator.autocast():
                             curr_dataset_name = batch['dataset'][0]
                             save_filename = f"{global_step}_dataset-{curr_dataset_name}"
@@ -920,7 +919,7 @@ def main_eval(
     else:
         eval_list = [[validation_data.prompt_image, validation_data.prompt]]
 
-    output_dir = "output/svd_out"
+    output_dir = "output/svd_signal_v2"
     iters = 5
     for example in eval_list:
         for t in range(iters):

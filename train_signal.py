@@ -732,7 +732,7 @@ def finetune_unet(accelerator, batch, use_offset_noise,
     signal_encoder = LatentSignalEncoder(output_dim=1024).to(latents.device)
     signal_encoder2 = LatentSignalEncoder(output_dim=noisy_latents.size(-1) * noisy_latents.size(-2)).to(latents.device)
     signal_encoder3 = LatentSignalEncoder(input_dim=signal_values.size(1) * signal_values.size(2),
-                                          output_dim=noisy_latents.size(-1) * noisy_latents.size(-2)).to(latents.device)
+                                            output_dim=noisy_latents.size(-1) * noisy_latents.size(-2)).to(latents.device)
 
     signal_embeddings = signal_encoder(signal_values).half().to(latents.device)
     # signal_embeddings, torch.Size([2, 1, 800])

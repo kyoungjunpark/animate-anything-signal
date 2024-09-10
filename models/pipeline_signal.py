@@ -464,7 +464,7 @@ class LatentToVideoPipeline(TextToVideoSDPipeline):
         signal_encoder2 = LatentSignalEncoder(output_dim=latents.size(-1) * latents.size(-2)).to(
             latents.device)
         signal_encoder3 = LatentSignalEncoder(input_dim=signal_values.size(1) * signal_values.size(2),
-                                              output_dim=latents.size(-1) * latents.size(-2)).to(
+                                                output_dim=latents.size(-1) * latents.size(-2)).to(
             latents.device)
         signal_embeddings2 = signal_encoder2(signal_values).half().to(
             latents.device)  # signal_embeddings2 = [8, 20, 64x64]

@@ -418,7 +418,7 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin):
         else:
             emb = self.time_embedding(t_emb, timestep_cond)
         emb = emb.repeat_interleave(repeats=num_frames, dim=0)
-        encoder_hidden_states = encoder_hidden_states.repeat_interleave(repeats=num_frames, dim=0)
+        # encoder_hidden_states = encoder_hidden_states.repeat_interleave(repeats=num_frames, dim=0)
 
         # 2. pre-process
         if self.motion_mask and mask is not None:

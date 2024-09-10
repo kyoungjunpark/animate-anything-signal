@@ -27,6 +27,7 @@ from accelerate.logging import get_logger
 from accelerate.utils import set_seed, ProjectConfiguration
 
 from diffusers.models import AutoencoderKL, UNetSpatioTemporalConditionModel
+
 from diffusers import DPMSolverMultistepScheduler, DDPMScheduler, EulerDiscreteScheduler
 from diffusers.image_processor import VaeImageProcessor
 from diffusers.optimization import get_scheduler
@@ -35,16 +36,18 @@ from diffusers.utils.import_utils import is_xformers_available
 from diffusers.models.attention_processor import AttnProcessor2_0, Attention
 from diffusers.models.attention import BasicTransformerBlock
 
-from diffusers import StableVideoDiffusionPipeline
+# from diffusers import StableVideoDiffusionPipeline
 from diffusers.pipelines.stable_video_diffusion.pipeline_stable_video_diffusion import _resize_with_antialiasing
 
 from models.layerdiffuse_VAE import LatentSignalEncoder
+from models.pipeline_stable_video_diffusion import StableVideoDiffusionPipeline
 from utils.dataset import get_train_dataset, extend_datasets
 from einops import rearrange, repeat
 import imageio
 import wandb
+from models.unet_3d_condition import UNet3DConditionModel
 
-from models.pipeline_signal import MaskStableVideoDiffusionPipeline
+from models.pipeline_signal_v2 import MaskStableVideoDiffusionPipeline
 
 already_printed_trainables = False
 
@@ -90,9 +93,10 @@ def load_primary_models(pretrained_model_path, eval=False):
     CHIRP_LEN = 512
     encoder_hidden_dim = 1024
 
-    signal_encoder = LatentSignalEncoder(input_dim=fps * CHIRP_LEN, output_dim=encoder_hidden_dim)
-    input_latents_dim1 = 64
-    input_latents_dim2 = 64
+    signal_encoder = LatentSignalEncoder(output_dim=encoder_hidden_dim)
+    # Just large dim for later interpolation
+    input_latents_dim1 = 100
+    input_latents_dim2 = 100
 
     signal_encoder2 = LatentSignalEncoder(output_dim=input_latents_dim1 * input_latents_dim2)
 
@@ -359,6 +363,7 @@ def save_pipe(
 
     del pipeline
     del unet_out
+    del sig1_out, sig2_out
     torch.cuda.empty_cache()
     gc.collect()
 
@@ -432,31 +437,39 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
                                condition_latent / vae.config.scaling_factor], dim=2)
 
     # Signal embedding
-    signal_values = torch.real(batch['signal_values']).float().half()  # [B, FPS, 512]
+    assert "frame_step" in batch.keys()
+    frame_step = batch["frame_step"]
+    signal_values = torch.real(batch['signal_values']).float().half()  # [B, FPS * frame_step, 512]
     signal_values = torch.nan_to_num(signal_values, nan=0.0)
 
     # signal_encoder = LatentSignalEncoder(input_dim=signal_values.size(-1) * signal_values.size(-2), output_dim=1024).to(device)
     # signal_encoder2 = LatentSignalEncoder(output_dim=input_latents.size(-1) * input_latents.size(-2)).to(device)
-    signal_encoder = sig1
-    signal_encoder2 = sig2
+    signal_encoder = sig1.to(latents.device)
+    signal_encoder2 = sig2.to(latents.device)
 
     bsz = signal_values.size(0)
     fps = signal_values.size(1)
 
     # [B, FPS, 512] -> [B * FPS, 512]
-    signal_values = torch.nan_to_num(signal_values, nan=0.0)
-
-    signal_values_resized = rearrange(signal_values, 'b f c-> b (f c)')
     # print(signal_values.size())
-    signal_embeddings = signal_encoder(signal_values_resized).to(latents.device)
-    signal_embeddings = signal_embeddings.reshape(bsz, 1, -1)
+    signal_embeddings = signal_encoder(signal_values)
+    # signal_embeddings = signal_embeddings.reshape(bsz, 1, -1)
 
     # signal_embeddings = rearrange(signal_embeddings, '(b f) c-> b f c', b=bsz)  # [B, FPS, 32]
     # print("after rearrange: ", signal_embeddings.size())  # torch.Size([2, 25 -> 1, 1024]) torch.Size([50, 1, 1024])
-
+    # print("signal_values", signal_values.size())
     signal_embeddings2 = signal_encoder2(signal_values)
-    signal_embeddings2 = rearrange(signal_embeddings2, 'b f (c h w)-> b f c h w', b=bsz, c=1,
-                                   h=input_latents.size(-2), w=input_latents.size(-1))  # [B, FPS, 32]
+    # print("signal_embeddings2", signal_embeddings2.size())
+
+    signal_embeddings2 = rearrange(signal_embeddings2, 'b f (c h w)-> (b f) c h w', c=1,
+                                   h=100, w=100)  # [B, FPS, 32]
+    # print("after signal_embeddings2", signal_embeddings2.size())
+    # signal_values torch.Size([2, 25, 512])
+    # signal_embeddings2 torch.Size([2, 25, 10000])
+    # after signal_embeddings2 torch.Size([2, 25, 1, 100, 100])
+    signal_embeddings2 = F.interpolate(signal_embeddings2, size=(input_latents.size(-2), input_latents.size(-1)), mode='bilinear')
+    signal_embeddings2 = rearrange(signal_embeddings2, '(b f) c h w-> b f c h w', b=bsz)  # [B, FPS, 32]
+    # print("after interpolate", signal_embeddings2.size())
     # print("after rearrange2: ", signal_embeddings2.size()) # after rearrange2:  torch.Size([2, 25, 1, 64, 64])
 
     # signal_embeddings = signal_embeddings.reshape(signal_embeddings.size(0), 1, -1)
@@ -502,7 +515,7 @@ def main(
         train_data: Dict,
         validation_data: Dict,
         extra_train_data: list = [],
-        dataset_types: Tuple[str] = ('json'),
+        dataset_types: Tuple[str] = 'json',
         shuffle: bool = True,
         validation_steps: int = 100,
         trainable_modules: Tuple[str] = None,  # Eg: ("attn1", "attn2")
@@ -680,7 +693,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("svd_with_signal_v1")
+        accelerator.init_trackers("svd_with_signal_v3_new_data_reduced_layers_agg_sig")
         wandb.require("core")
 
     # Train!
@@ -732,7 +745,7 @@ def main(
                     progress_bar.update(1)
                 continue
 
-            with accelerator.accumulate(unet), accelerator.accumulate(text_encoder):
+            with accelerator.accumulate(unet), accelerator.accumulate(sig1), accelerator.accumulate(sig2):
                 with accelerator.autocast():
                     loss = finetune_unet(accelerator, pipeline, batch, use_offset_noise,
                                          rescale_schedule, offset_noise_strength, unet, sig1, sig2, motion_mask)
@@ -773,9 +786,8 @@ def main(
                         save_pretrained_model=save_pretrained_model
                     )
 
-                if should_sample(global_step, validation_steps, validation_data):
+                if should_sample(global_step, validation_steps, validation_data) and accelerator.is_main_process:
                     if global_step == 1: print("Performing validation prompt.")
-                    if accelerator.is_main_process:
                         with accelerator.autocast():
                             curr_dataset_name = batch['dataset'][0]
                             save_filename = f"{global_step}_dataset-{curr_dataset_name}"
@@ -817,6 +829,7 @@ def eval(pipeline, vae_processor, sig1, sig2, validation_data, out_file, index, 
     diffusion_scheduler = pipeline.scheduler
     diffusion_scheduler.set_timesteps(validation_data.num_inference_steps, device=device)
 
+    # prompt = validation_data.prompt
     # scale = math.sqrt(width * height / (validation_data.height * validation_data.width))
     # block_size = 64
     # validation_data.height = round(height / scale / block_size) * block_size
@@ -828,7 +841,10 @@ def eval(pipeline, vae_processor, sig1, sig2, validation_data, out_file, index, 
 
     # prepare inital latents
     initial_latents = None
+
     for image, signal in zip(validation_data.prompt_image, validation_data.signal):
+        # print(out_file)
+        # print(image)
         image_replaced = image.replace("frame", str(index)+"_frame").replace('.jpg', '.gif')
         target_file = out_file + image_replaced
         # print(out_file)
@@ -879,7 +895,8 @@ def eval(pipeline, vae_processor, sig1, sig2, validation_data, out_file, index, 
             fps = validation_data.get('fps', 8)
             imageio.mimwrite(target_file, video_frames, duration=int(1000 / fps), loop=0)
             imageio.mimwrite(target_file.replace('.gif', '.mp4'), video_frames, fps=fps)
-            # resized_frames = [cv2.resize(frame, (125, 125)) for frame in video_frames]
+            # resized_frames = [np.array(cv2.resize(frame, (125, 125))) for frame in np.array(video_frames)]
+            # resized_frames = np.array(resized_frames)
             wandb.log({image: wandb.Video(target_file.replace('.gif', '.mp4'),
                                                     caption=target_file.replace('.gif', '.mp4'), fps=fps, format="mp4")})
 
@@ -906,7 +923,7 @@ def main_eval(
     else:
         eval_list = [[validation_data.prompt_image, validation_data.prompt]]
 
-    output_dir = "output/svd_signal_v1"
+    output_dir = "output/svd_signal_v3"
     iters = 5
     for example in eval_list:
         for t in range(iters):
@@ -916,7 +933,6 @@ def main_eval(
             out_file = f"{out_file_dir}/{t}.gif"
             validation_data.prompt_image = name
             validation_data.prompt = prompt
-
             eval(pipeline, vae_processor, validation_data, out_file, t)
             print("save file", out_file)
 

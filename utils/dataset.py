@@ -132,6 +132,29 @@ def get_frame_signal_batch(signal_path, max_frames, sample_fps, vr, transform):
     return video, partial_channels
 
 
+def get_frame_agg_signal_batch(signal_path, max_frames, sample_fps, vr, transform):
+    native_fps = vr.get_avg_fps()
+    max_range = len(vr)
+    frame_step = max(1, round(native_fps / sample_fps))
+    frame_range = range(0, max_range, frame_step)
+    if len(frame_range) < max_frames:
+        frame_range = np.linspace(0, max_range - 1, max_frames).astype(int)
+    # start = random.randint(0, len(frame_range) - max_frames)
+    start = len(frame_range) - max_frames
+    frame_range_indices = list(frame_range)[start:start + max_frames]
+    frames = vr.get_batch(frame_range_indices)
+    video = rearrange(frames, "f h w c -> f c h w")
+    video = transform(video)
+    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    channels = torch.load(signal_path, map_location="cuda:0", weights_only=True)
+
+    partial_channels = channels[start:start + max_frames]
+
+    # partial_channels = np.array(0)
+    return video, partial_channels, frame_step
+
+
 def process_video(vid_path, use_bucketing, w, h, get_frame_buckets, get_frame_batch):
     if use_bucketing:
         vr = decord.VideoReader(vid_path)
@@ -269,6 +292,44 @@ class VideoBLIPDataset(Dataset):
 
         return example
 
+    def train_data_sig_agg_batch(self, index):
+        vid_data = self.train_data[index]
+        # Get video prompt
+        prompt = vid_data['prompt']
+        # If we are training on individual clips.
+        if 'clip_path' in self.train_data[index] and \
+                self.train_data[index]['clip_path'] is not None:
+            clip_path = vid_data['clip_path']
+        else:
+            clip_path = vid_data[self.vid_data_key]
+            # Get the frame of the current index.
+            self.sample_start_idx = vid_data['frame_index']
+
+        vr = decord.VideoReader(clip_path)
+
+        video, signal, frame_step = get_frame_agg_signal_batch(vid_data[self.sig_data_key], self.n_sample_frames, self.fps, vr, self.transform)
+        # video = get_frame_batch(self.n_sample_frames, self.fps, vr, self.transform)
+
+        # prompt_ids = np.array(0)
+        # prompt = np.array(0)
+        prompt_ids = get_prompt_ids(prompt, self.tokenizer)
+
+        example = {
+            "pixel_values": normalize_input(video),
+            "signal_values": signal,
+            "prompt_ids": prompt_ids,
+            "text_prompt": prompt,
+            "frame_step": frame_step,
+            'dataset': self.__getname__(),
+        }
+        # mask = np.array(0)
+        mask = get_moved_area_mask(video.permute([0, 2, 3, 1]).numpy())
+        example['mask'] = mask
+        # example['motion'] = np.array(0)
+        example['motion'] = calculate_motion_score(video.permute([0, 2, 3, 1]).numpy())
+
+        return example
+
     @staticmethod
     def __getname__():
         return 'video_blip'
@@ -285,6 +346,147 @@ class VideoBLIPDataset(Dataset):
             return self.__getitem__(random.randint(0, len(self) - 1))
         return example
 
+
+class VideoBLIPDataset_V2(Dataset):
+    def __init__(
+            self,
+            tokenizer=None,
+            width: int = 256,
+            height: int = 256,
+            n_sample_frames: int = 4,
+            sample_start_idx: int = 1,
+            fps: int = 1,
+            json_path: str = "",
+            json_data=None,
+            vid_data_key: str = "video_path",
+            sig_data_key: str = "signal_path",
+            preprocessed: bool = False,
+            use_bucketing: bool = False,
+            motion_threshold=50,
+            **kwargs
+    ):
+        self.vid_types = (".mp4", ".avi", ".mov", ".webm", ".flv", ".mjpeg")
+        self.use_bucketing = use_bucketing
+        self.tokenizer = tokenizer
+        self.preprocessed = preprocessed
+
+        self.vid_data_key = vid_data_key
+        self.sig_data_key = sig_data_key
+
+        self.train_data = self.load_from_json(json_path, json_data)
+        self.motion_threshold = motion_threshold
+        self.width = width
+        self.height = height
+
+        self.n_sample_frames = n_sample_frames
+        self.sample_start_idx = sample_start_idx
+        self.fps = fps
+        self.transform = T.Compose([
+            # T.RandomResizedCrop(size=(height, width), scale=(0.8, 1.0), ratio=(width/height, width/height), antialias=False)
+            T.Resize(min(height, width), antialias=False),
+            T.CenterCrop([height, width])
+        ])
+
+    def build_json(self, json_data):
+        extended_data = []
+        for data in json_data['data']:
+            for nested_data in data['data']:
+                self.build_json_dict(
+                    data,
+                    nested_data,
+                    extended_data
+                )
+        json_data = extended_data
+        return json_data
+
+    def build_json_dict(self, data, nested_data, extended_data):
+        clip_path = nested_data['clip_path'] if 'clip_path' in nested_data else None
+
+        extended_data.append({
+            self.vid_data_key: data[self.vid_data_key],
+            self.sig_data_key: data[self.sig_data_key],
+            'frame_index': nested_data['frame_index'],
+            'prompt': nested_data['prompt'],
+            'clip_path': clip_path
+        })
+
+    def load_from_json(self, path, json_data):
+        try:
+            with open(path) as jpath:
+                print(f"Loading JSON from {path}")
+                json_data = json.load(jpath)
+
+                return self.build_json(json_data)
+
+        except:
+            import traceback
+            traceback.print_exc()
+            self.train_data = []
+            print("Non-existant JSON path. Skipping.")
+
+    def validate_json(self, base_path, path):
+        return os.path.exists(f"{base_path}/{path}")
+
+    def get_frame_buckets(self, vr):
+        _, h, w = vr[0].shape
+        width, height = sensible_buckets(self.width, self.height, h, w)
+        resize = T.transforms.Resize((height, width), antialias=True)
+
+        return resize
+
+    def train_data_sig_agg_batch(self, index):
+        vid_data = self.train_data[index]
+        # Get video prompt
+        prompt = vid_data['prompt']
+        # If we are training on individual clips.
+        if 'clip_path' in self.train_data[index] and \
+                self.train_data[index]['clip_path'] is not None:
+            clip_path = vid_data['clip_path']
+        else:
+            clip_path = vid_data[self.vid_data_key]
+            # Get the frame of the current index.
+            self.sample_start_idx = vid_data['frame_index']
+
+        vr = decord.VideoReader(clip_path)
+
+        video, signal, frame_step = get_frame_agg_signal_batch(vid_data[self.sig_data_key], self.n_sample_frames, self.fps, vr, self.transform)
+        # video = get_frame_batch(self.n_sample_frames, self.fps, vr, self.transform)
+
+        # prompt_ids = np.array(0)
+        # prompt = np.array(0)
+        prompt_ids = get_prompt_ids(prompt, self.tokenizer)
+
+        example = {
+            "pixel_values": normalize_input(video),
+            "signal_values": signal,
+            "prompt_ids": prompt_ids,
+            "text_prompt": prompt,
+            "frame_step": frame_step,
+            'dataset': self.__getname__(),
+        }
+        # mask = np.array(0)
+        mask = get_moved_area_mask(video.permute([0, 2, 3, 1]).numpy())
+        example['mask'] = mask
+        # example['motion'] = np.array(0)
+        example['motion'] = calculate_motion_score(video.permute([0, 2, 3, 1]).numpy())
+
+        return example
+
+    @staticmethod
+    def __getname__():
+        return 'video_blip_v2'
+
+    def __len__(self):
+        if self.train_data is not None:
+            return len(self.train_data)
+        else:
+            return 0
+
+    def __getitem__(self, index):
+        example = self.train_data_sig_agg_batch(index)
+        if example['motion'] < self.motion_threshold:
+            return self.__getitem__(random.randint(0, len(self) - 1))
+        return example
 
 class SingleVideoDataset(Dataset):
     def __init__(
