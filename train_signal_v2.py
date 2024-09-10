@@ -26,25 +26,28 @@ from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed, ProjectConfiguration
 
-from diffusers.models import AutoencoderKL, UNetSpatioTemporalConditionModel
-from diffusers import DPMSolverMultistepScheduler, DDPMScheduler, EulerDiscreteScheduler
+from diffusers.models import AutoencoderKL
+from diffusers import DPMSolverMultistepScheduler, DDPMScheduler
 from diffusers.image_processor import VaeImageProcessor
 from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version
 from diffusers.utils.import_utils import is_xformers_available
 from diffusers.models.attention_processor import AttnProcessor2_0, Attention
 from diffusers.models.attention import BasicTransformerBlock
+from diffusers.schedulers.scheduling_ddim import rescale_zero_terminal_snr
 
-from diffusers import StableVideoDiffusionPipeline
-from diffusers.pipelines.stable_video_diffusion.pipeline_stable_video_diffusion import _resize_with_antialiasing
-
-from models.layerdiffuse_VAE import LatentSignalEncoder
+from models.layerdiffuse_VAE import LatentSignalEncoder, ImageResizeEncoder, SignalResizeEncoder
 from utils.dataset import get_train_dataset, extend_datasets
 from einops import rearrange, repeat
 import imageio
 import wandb
 
-from models.pipeline_signal_v2 import MaskStableVideoDiffusionPipeline
+from models.unet_3d_condition_signal import UNet3DConditionModel
+from models.pipeline_signal_v2 import LatentToVideoPipeline
+from utils.common import read_mask, generate_random_mask, slerp, calculate_motion_score, \
+    read_video, calculate_motion_precision, calculate_latent_motion_score, \
+    DDPM_forward, DDPM_forward_timesteps, DDPM_forward_mask, motion_mask_loss, \
+    generate_center_mask, tensor_to_vae_latent
 
 already_printed_trainables = False
 
@@ -80,12 +83,26 @@ def create_output_folders(output_dir, config):
     return out_dir
 
 
-def load_primary_models(pretrained_model_path, eval=False):
-    if eval:
-        pipeline = StableVideoDiffusionPipeline.from_pretrained(pretrained_model_path, torch_dtype=torch.float16,
-                                                                variant='fp16')
-    else:
-        pipeline = StableVideoDiffusionPipeline.from_pretrained(pretrained_model_path)
+def load_primary_models(pretrained_model_path, in_channels=-1):
+    noise_scheduler = DDPMScheduler.from_pretrained(pretrained_model_path, subfolder="scheduler")
+    # tokenizer = CLIPTokenizer.from_pretrained(pretrained_model_path, subfolder="tokenizer")
+    # text_encoder = CLIPTextModel.from_pretrained(pretrained_model_path, subfolder="text_encoder")
+    vae = AutoencoderKL.from_pretrained(pretrained_model_path, subfolder="vae")
+    unet = UNet3DConditionModel.from_pretrained(pretrained_model_path, subfolder="unet")
+    if in_channels > 0 and unet.config.in_channels != in_channels:
+        print(f"[load_primary_models] Handle the channel mismatch {unet.config.in_channels} vs {in_channels}")
+        # first time init, modify unet conv in
+        unet2 = unet
+        unet = UNet3DConditionModel.from_pretrained(pretrained_model_path, subfolder="unet",
+                                                    in_channels=in_channels,
+                                                    low_cpu_mem_usage=False, device_map=None,
+                                                    ignore_mismatched_sizes=True)
+        unet.conv_in.bias.data = copy.deepcopy(unet2.conv_in.bias)
+        torch.nn.init.zeros_(unet.conv_in.weight)
+        load_in_channel = unet2.conv_in.weight.data.shape[1]
+        unet.conv_in.weight.data[:, in_channels - load_in_channel:] = copy.deepcopy(unet2.conv_in.weight.data)
+        del unet2
+
     fps = 25
     CHIRP_LEN = 512
     encoder_hidden_dim = 1024
@@ -96,33 +113,16 @@ def load_primary_models(pretrained_model_path, eval=False):
     input_latents_dim2 = 100
 
     signal_encoder2 = LatentSignalEncoder(output_dim=input_latents_dim1 * input_latents_dim2)
+    signal_encoder3 = LatentSignalEncoder(output_dim=input_latents_dim1 * input_latents_dim2)
 
-    return pipeline, None, pipeline.feature_extractor, pipeline.scheduler, pipeline.image_processor, \
-           pipeline.image_encoder, pipeline.vae, pipeline.unet, signal_encoder, signal_encoder2
-
-
-def convert_svd(pretrained_model_path, out_path):
-    pipeline = StableVideoDiffusionPipeline.from_pretrained(pretrained_model_path)
-
-    unet = UNetSpatioTemporalConditionModel.from_pretrained(
-        pretrained_model_path, subfolder="unet_mask", low_cpu_mem_usage=False, ignore_mismatched_sizes=True)
-    unet.conv_in.bias.data = copy.deepcopy(pipeline.unet.conv_in.bias)
-    torch.nn.init.zeros_(unet.conv_in.weight)
-    unet.conv_in.weight.data[:, 1:] = copy.deepcopy(pipeline.unet.conv_in.weight)
-    new_pipeline = StableVideoDiffusionPipeline.from_pretrained(
-        pretrained_model_path, unet=unet)
-    new_pipeline.save_pretrained(out_path)
+    return noise_scheduler, vae, unet, signal_encoder, signal_encoder2, signal_encoder3
 
 
-def unet_and_text_g_c(unet, text_encoder, unet_enable, text_enable):
+def unet_and_text_g_c(unet, unet_enable):
     if unet_enable:
         unet.enable_gradient_checkpointing()
     else:
         unet.disable_gradient_checkpointing()
-    if text_enable:
-        text_encoder.gradient_checkpointing_enable()
-    else:
-        text_encoder.gradient_checkpointing_disable()
 
 
 def freeze_models(models_to_freeze):
@@ -182,16 +182,6 @@ def param_optim(model, condition, extra_params=None, is_lora=False, negation=Non
     }
 
 
-def negate_params(name, negation):
-    # We have to do this if we are co-training with LoRA.
-    # This ensures that parameter groups aren't duplicated.
-    if negation is None: return False
-    for n in negation:
-        if n in name and 'temp' not in name:
-            return True
-    return False
-
-
 def create_optim_params(name='param', params=None, lr=5e-6, extra_params=None):
     params = {
         "name": name,
@@ -203,6 +193,16 @@ def create_optim_params(name='param', params=None, lr=5e-6, extra_params=None):
             params[k] = v
 
     return params
+
+
+def negate_params(name, negation):
+    # We have to do this if we are co-training with LoRA.
+    # This ensures that parameter groups aren't duplicated.
+    if negation is None: return False
+    for n in negation:
+        if n in name and 'temp' not in name:
+            return True
+    return False
 
 
 def create_optimizer_params(model_list, lr):
@@ -285,38 +285,6 @@ def sample_noise(latents, noise_strength, use_offset_noise=False):
     return noise_latents
 
 
-def enforce_zero_terminal_snr(betas):
-    """
-    Corrects noise in diffusion schedulers.
-    From: Common Diffusion Noise Schedules and Sample Steps are Flawed
-    https://arxiv.org/pdf/2305.08891.pdf
-    """
-    # Convert betas to alphas_bar_sqrt
-    alphas = 1 - betas
-    alphas_bar = alphas.cumprod(0)
-    alphas_bar_sqrt = alphas_bar.sqrt()
-
-    # Store old values.
-    alphas_bar_sqrt_0 = alphas_bar_sqrt[0].clone()
-    alphas_bar_sqrt_T = alphas_bar_sqrt[-1].clone()
-
-    # Shift so the last timestep is zero.
-    alphas_bar_sqrt -= alphas_bar_sqrt_T
-
-    # Scale so the first timestep is back to the old value.
-    alphas_bar_sqrt *= alphas_bar_sqrt_0 / (
-            alphas_bar_sqrt_0 - alphas_bar_sqrt_T
-    )
-
-    # Convert alphas_bar_sqrt to betas
-    alphas_bar = alphas_bar_sqrt ** 2
-    alphas = alphas_bar[1:] / alphas_bar[:-1]
-    alphas = torch.cat([alphas_bar[0:1], alphas])
-    betas = 1 - alphas
-
-    return betas
-
-
 def should_sample(global_step, validation_steps, validation_data):
     return (global_step % validation_steps == 0 or global_step == 5) \
            and validation_data.sample_preview
@@ -327,10 +295,10 @@ def save_pipe(
         global_step,
         accelerator,
         unet,
-        text_encoder,
         vae,
         sig1,
         sig2,
+        sig3,
         output_dir,
         is_checkpoint=False,
         save_pretrained_model=True
@@ -340,14 +308,22 @@ def save_pipe(
         os.makedirs(save_path, exist_ok=True)
     else:
         save_path = output_dir
-
+    # Copy the model without creating a reference to it. This allows keeping the state of our lora training if enabled.
     unet_out = copy.deepcopy(unet)
-    pipeline = StableVideoDiffusionPipeline.from_pretrained(
-        path, unet=unet_out).to(torch_dtype=torch.float32)
+    # text_encoder_out = copy.deepcopy(text_encoder)
+    vae_out = copy.deepcopy(vae)
+
+    pipeline = LatentToVideoPipeline.from_pretrained(
+        path,
+        unet=unet_out,
+        text_encoder=None,
+        tokenizer=None,
+        vae=vae_out,
+    ).to(torch_dtype=torch.float32)
 
     sig1_out = copy.deepcopy(sig1)
-
     sig2_out = copy.deepcopy(sig2)
+    sig23out = copy.deepcopy(sig3)
 
     if save_pretrained_model:
         pipeline.save_pretrained(save_path)
@@ -355,20 +331,17 @@ def save_pipe(
         os.makedirs(signal_save_path, exist_ok=True)
         torch.save(sig1_out.state_dict(), signal_save_path + 'sig1.pth')
         torch.save(sig2_out.state_dict(), signal_save_path + 'sig2.pth')
+        torch.save(sig3_out.state_dict(), signal_save_path + 'sig3.pth')
 
     logger.info(f"Saved model at {save_path} on step {global_step}")
 
     del pipeline
     del unet_out
-    del sig1_out, sig2_out
+    del sig1_out, sig2_out, sig3_out
+    # del text_encoder_out
+    del vae_out
     torch.cuda.empty_cache()
     gc.collect()
-
-
-def replace_prompt(prompt, token, wlist):
-    for w in wlist:
-        if w in prompt: return prompt.replace(w, token)
-    return prompt
 
 
 def prompt_image(image, processor, encoder):
@@ -382,129 +355,6 @@ def prompt_image(image, processor, encoder):
     return inputs
 
 
-def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
-                  rescale_schedule, offset_noise_strength, unet, sig1, sig2, motion_mask,
-                  P_mean=0.7, P_std=1.6):
-    pipeline.vae.eval()
-    pipeline.image_encoder.eval()
-
-    device = unet.device
-    dtype = pipeline.vae.dtype
-    vae = pipeline.vae
-    # Convert videos to latent space
-    pixel_values = batch['pixel_values']
-    bsz, num_frames = pixel_values.shape[:2]
-
-    frames = rearrange(pixel_values, 'b f c h w-> (b f) c h w').to(dtype)
-    latents = vae.encode(frames).latent_dist.mode() * vae.config.scaling_factor
-    latents = rearrange(latents, '(b f) c h w-> b f c h w', b=bsz)
-
-    # enocde image latent
-    image = pixel_values[:, 0].to(dtype)
-    noise_aug_strength = math.exp(random.normalvariate(mu=-3, sigma=0.5))
-    image = image + noise_aug_strength * torch.randn_like(image)
-    image_latent = vae.encode(image).latent_dist.mode() * vae.config.scaling_factor
-
-    condition_latent = repeat(image_latent, 'b c h w->b f c h w', f=num_frames)
-
-    pipeline.image_encoder.to(device, dtype=dtype)
-
-    images = _resize_with_antialiasing(pixel_values[:, 0], (224, 224)).to(dtype)
-    images = (images + 1.0) / 2.0  # [-1, 1] -> [0, 1]
-    images = pipeline.feature_extractor(
-        images=images,
-        do_normalize=True,
-        do_center_crop=False,
-        do_resize=False,
-        do_rescale=False,
-        return_tensors="pt",
-    ).pixel_values
-    image_embeddings = pipeline._encode_image(images, device, 1, False)
-    # print("image_embedding: ", image_embeddings.size()) image_embedding:  torch.Size([2, 1, 1024])
-    rnd_normal = torch.randn([bsz, 1, 1, 1, 1], device=device)
-    sigma = (rnd_normal * P_std + P_mean).exp()
-    c_skip = 1 / (sigma ** 2 + 1)
-    c_out = -sigma / (sigma ** 2 + 1) ** 0.5
-    c_in = 1 / (sigma ** 2 + 1) ** 0.5
-    c_noise = (sigma.log() / 4).reshape([bsz])
-    loss_weight = (sigma ** 2 + 1) / sigma ** 2
-
-    noisy_latents = latents + torch.randn_like(latents) * sigma
-    input_latents = torch.cat([c_in * noisy_latents,
-                               condition_latent / vae.config.scaling_factor], dim=2)
-
-    # Signal embedding
-    signal_values = batch['signal_values'].float().half()  # [B, FPS, 512]
-    signal_values = torch.nan_to_num(signal_values, nan=0.0)
-
-    # signal_encoder = LatentSignalEncoder(input_dim=signal_values.size(-1) * signal_values.size(-2), output_dim=1024).to(device)
-    # signal_encoder2 = LatentSignalEncoder(output_dim=input_latents.size(-1) * input_latents.size(-2)).to(device)
-    signal_encoder = sig1.to(latents.device)
-    signal_encoder2 = sig2.to(latents.device)
-
-    bsz = signal_values.size(0)
-    fps = signal_values.size(1)
-
-    # [B, FPS, 512] -> [B * FPS, 512]
-    signal_values_resized = rearrange(signal_values, 'b f c-> b (f c)')
-    # print(signal_values.size())
-    signal_embeddings = signal_encoder(signal_values_resized)
-    signal_embeddings = signal_embeddings.reshape(bsz, 1, -1)
-
-    # signal_embeddings = rearrange(signal_embeddings, '(b f) c-> b f c', b=bsz)  # [B, FPS, 32]
-    # print("after rearrange: ", signal_embeddings.size())  # torch.Size([2, 25 -> 1, 1024]) torch.Size([50, 1, 1024])
-    # print("signal_values", signal_values.size())
-    signal_embeddings2 = signal_encoder2(signal_values)
-    # print("signal_embeddings2", signal_embeddings2.size())
-
-    signal_embeddings2 = rearrange(signal_embeddings2, 'b f (c h w)-> (b f) c h w', c=1,
-                                   h=100, w=100)  # [B, FPS, 32]
-    # print("after signal_embeddings2", signal_embeddings2.size())
-    # signal_values torch.Size([2, 25, 512])
-    # signal_embeddings2 torch.Size([2, 25, 10000])
-    # after signal_embeddings2 torch.Size([2, 25, 1, 100, 100])
-    signal_embeddings2 = F.interpolate(signal_embeddings2, size=(input_latents.size(-2), input_latents.size(-1)), mode='bilinear')
-    signal_embeddings2 = rearrange(signal_embeddings2, '(b f) c h w-> b f c h w', b=bsz)  # [B, FPS, 32]
-    # print("after interpolate", signal_embeddings2.size())
-    # print("after rearrange2: ", signal_embeddings2.size()) # after rearrange2:  torch.Size([2, 25, 1, 64, 64])
-
-    # signal_embeddings = signal_embeddings.reshape(signal_embeddings.size(0), 1, -1)
-    # signal_resize_encoder = SignalResizeEncoder(input_dim=signal_embeddings.size(-1), output_dim=1024).half().to(device)
-    # image_resize_encoder = ImageResizeEncoder(input_dim=image_embeddings.size(-1), output_dim=512).half().to(device)
-
-    # image_embeddings = image_resize_encoder(image_embeddings.half())
-    # signal_embeddings_resized = signal_resize_encoder(signal_embeddings.half())
-
-    # Change cross attention (use condition how motion) for signal sensing (see text embedding from animate-anything)
-
-    # encoder_hidden_states = torch.cat((image_embeddings, signal_embeddings), dim=2)
-    encoder_hidden_states = signal_embeddings
-    uncond_hidden_states = torch.zeros_like(encoder_hidden_states)
-
-    if random.random() < 0.15:
-        encoder_hidden_states = uncond_hidden_states
-    # Add noise to the latents according to the noise magnitude at each timestep
-    # (this is the forward diffusion process) #[bsz, f, c, h , w]
-
-    # input_latents:  torch.Size([2, 25, 8, 64, 64])
-    # signal_embeddings2: torch.Size([2, 25, 8 -> 1, 64, 64])
-    input_latents = torch.cat([signal_embeddings2, input_latents], dim=2)
-    # print("final latents ", input_latents.size()) # final latents  torch.Size([2, 25, 9, 64, 64])
-    motion_bucket_id = 127
-    added_time_ids = pipeline._get_add_time_ids(fps, motion_bucket_id,
-                                                noise_aug_strength, signal_embeddings.dtype, bsz, 1, False)
-    added_time_ids = added_time_ids.to(device)
-
-    loss = 0
-
-    accelerator.wait_for_everyone()
-    model_pred = unet(input_latents, c_noise, encoder_hidden_states=encoder_hidden_states,
-                      added_time_ids=added_time_ids).sample
-    predict_x0 = c_out * model_pred + c_skip * noisy_latents
-    loss += ((predict_x0 - latents) ** 2 * loss_weight).mean()
-    return loss
-
-
 def main(
         pretrained_model_path: str,
         output_dir: str,
@@ -515,14 +365,14 @@ def main(
         shuffle: bool = True,
         validation_steps: int = 100,
         trainable_modules: Tuple[str] = None,  # Eg: ("attn1", "attn2")
+        not_trainable_modules=[],
         extra_unet_params=None,
-        extra_text_encoder_params=None,
         train_batch_size: int = 1,
         max_train_steps: int = 500,
         learning_rate: float = 5e-5,
         scale_lr: bool = False,
-        lr_scheduler: str = "constant",
-        lr_warmup_steps: int = 0,
+        lr_scheduler: str = "constant_with_warmup",
+        lr_warmup_steps: int = 20,
         adam_beta1: float = 0.9,
         adam_beta2: float = 0.999,
         adam_weight_decay: float = 1e-2,
@@ -530,7 +380,6 @@ def main(
         max_grad_norm: float = 1.0,
         gradient_accumulation_steps: int = 1,
         gradient_checkpointing: bool = False,
-        text_encoder_gradient_checkpointing: bool = False,
         checkpointing_steps: int = 500,
         resume_from_checkpoint: Optional[str] = None,
         resume_step: Optional[int] = None,
@@ -548,6 +397,7 @@ def main(
         save_pretrained_model: bool = True,
         logger_type: str = 'tensorboard',
         motion_mask=False,
+        in_channels=5,
         **kwargs
 ):
     *_, config = inspect.getargvalues(inspect.currentframe())
@@ -556,8 +406,7 @@ def main(
         gradient_accumulation_steps=gradient_accumulation_steps,
         mixed_precision=mixed_precision,
         log_with=logger_type,
-        project_dir=output_dir,
-        # project_config=config,
+        project_dir=output_dir
     )
 
     # Make one log on every process with the configuration for debugging.
@@ -574,9 +423,9 @@ def main(
     if accelerator.is_main_process:
         output_dir = create_output_folders(output_dir, config)
 
-    # Load scheduler, tokenizer and models. The text encoder is actually image encoder for SVD
-    pipeline, tokenizer, feature_extractor, train_scheduler, vae_processor, text_encoder, vae, unet, sig1, sig2 = load_primary_models(
-        pretrained_model_path)
+    # Load scheduler, tokenizer and models.
+    noise_scheduler, vae, unet, sig1, sig2, sig3 = load_primary_models(pretrained_model_path, in_channels)
+    vae_processor = VaeImageProcessor()
     # Freeze any necessary models
     freeze_models([vae, unet])
 
@@ -630,7 +479,7 @@ def main(
     )
 
     # Get the training dataset based on types (json, single_video, image)
-    train_datasets = get_train_dataset(dataset_types, train_data, tokenizer)
+    train_datasets = get_train_dataset(dataset_types, train_data)
 
     # If you have extra train data, you can add a list of however many you would like.
     # Eg: extra_train_data: [{: {dataset_types, train_data: {etc...}}}] 
@@ -638,7 +487,7 @@ def main(
         if extra_train_data is not None and len(extra_train_data) > 0:
             for dataset in extra_train_data:
                 d_t, t_d = dataset['dataset_types'], dataset['train_data']
-                train_datasets += get_train_dataset(d_t, t_d, tokenizer)
+                train_datasets += get_train_dataset(d_t, t_d)
 
     except Exception as e:
         print(f"Could not process extra train datasets due to an error : {e}")
@@ -673,24 +522,28 @@ def main(
     # Use Gradient Checkpointing if enabled.
     unet_and_text_g_c(
         unet,
-        text_encoder,
         gradient_checkpointing,
-        text_encoder_gradient_checkpointing
     )
+
+    # Enable VAE slicing to save memory.
+    vae.enable_slicing()
 
     # For mixed precision training we cast the text_encoder and vae weights to half-precision
     # as these models are only used for inference, keeping weights in full precision is not required.
     weight_dtype = is_mixed_precision(accelerator)
 
     # Move text encoders, and VAE to GPU
-    models_to_cast = [text_encoder, vae, sig1, sig2]
+    models_to_cast = [vae, sig1, sig2, sig3]
     cast_to_gpu_and_type(models_to_cast, accelerator.device, weight_dtype)
+
+    # Fix noise schedules to predcit light and dark areas if available.
+    if not use_offset_noise and rescale_schedule:
+        noise_scheduler.betas = rescale_zero_terminal_snr(noise_scheduler.betas)
 
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("svd_with_signal_v2_new_data_reduced_layers")
-        wandb.require("core")
+        accelerator.init_trackers("animate_signal")
 
     # Train!
     total_batch_size = train_batch_size * accelerator.num_processes * gradient_accumulation_steps
@@ -715,7 +568,7 @@ def main(
     # See: https://github.com/prigoyal/pytorch_memonger/blob/master/tutorial/Checkpointing_for_PyTorch_models.ipynb
     if kwargs.get('eval_train', False):
         unet.eval()
-        text_encoder.eval()
+
     if accelerator.is_main_process:
         print("Save Test")
         save_pipe(
@@ -723,14 +576,15 @@ def main(
             global_step,
             accelerator,
             accelerator.unwrap_model(unet),
-            accelerator.unwrap_model(text_encoder),
             vae,
             accelerator.unwrap_model(sig1),
             accelerator.unwrap_model(sig2),
+            accelerator.unwrap_model(sig3),
             output_dir,
             is_checkpoint=True,
             save_pretrained_model=save_pretrained_model
         )
+
     for epoch in range(first_epoch, num_train_epochs):
         train_loss = 0.0
 
@@ -740,31 +594,36 @@ def main(
                 if step % gradient_accumulation_steps == 0:
                     progress_bar.update(1)
                 continue
-
-            with accelerator.accumulate(unet), accelerator.accumulate(sig1), accelerator.accumulate(sig2):
+            with accelerator.accumulate(unet):
                 with accelerator.autocast():
-                    loss = finetune_unet(accelerator, pipeline, batch, use_offset_noise,
-                                         rescale_schedule, offset_noise_strength, unet, sig1, sig2, motion_mask)
+                    loss, latents = finetune_unet(accelerator, batch, use_offset_noise, cache_latents, vae,
+                                                  rescale_schedule, offset_noise_strength,
+                                                  unet, sig1, sig2, sig3, noise_scheduler, motion_mask)
+
                 device = loss.device
                 # Gather the losses across all processes for logging (if we use distributed training).
                 avg_loss = accelerator.gather(loss.repeat(train_batch_size)).mean()
                 train_loss += avg_loss.item() / gradient_accumulation_steps
 
                 # Backpropagate
-                accelerator.backward(loss)
-                params_to_clip = unet.parameters()
-                accelerator.clip_grad_norm_(params_to_clip, max_grad_norm)
+                try:
+                    accelerator.backward(loss)
+                    params_to_clip = unet.parameters()
 
-                optimizer.step()
-                lr_scheduler.step()
-                optimizer.zero_grad(set_to_none=True)
+                    accelerator.clip_grad_norm_(params_to_clip, max_grad_norm)
 
+                    optimizer.step()
+                    lr_scheduler.step()
+                    optimizer.zero_grad(set_to_none=True)
+
+                except Exception as e:
+                    print(f"An error has occured during backpropogation! {e}")
+                    continue
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
                 progress_bar.update(1)
-                accelerator.log({"train_loss": train_loss}, step=global_step)
                 global_step += 1
-
+                accelerator.log({"train_loss": train_loss}, step=global_step)
                 train_loss = 0.0
 
                 if global_step % checkpointing_steps == 0 and accelerator.is_main_process:
@@ -773,10 +632,10 @@ def main(
                         global_step,
                         accelerator,
                         accelerator.unwrap_model(unet),
-                        accelerator.unwrap_model(text_encoder),
                         vae,
                         accelerator.unwrap_model(sig1),
                         accelerator.unwrap_model(sig2),
+                        accelerator.unwrap_model(sig3),
                         output_dir,
                         is_checkpoint=True,
                         save_pretrained_model=save_pretrained_model
@@ -784,13 +643,11 @@ def main(
 
                 if should_sample(global_step, validation_steps, validation_data) and accelerator.is_main_process:
                     if global_step == 1: print("Performing validation prompt.")
-                    if accelerator.is_main_process:
-                        with accelerator.autocast():
-                            curr_dataset_name = batch['dataset'][0]
-                            save_filename = f"{global_step}_dataset-{curr_dataset_name}"
-                            out_file = f"{output_dir}/samples/"
-                            eval(pipeline, vae_processor, sig1, sig2, validation_data, out_file, global_step)
-                            logger.info(f"Saved a new sample to {out_file}")
+                    with accelerator.autocast():
+                        batch_eval(accelerator.unwrap_model(unet), vae,
+                                   vae_processor, pretrained_model_path,
+                                   validation_data, f"{output_dir}/samples", True, global_step=global_step, iters=1)
+                        logger.info(f"Saved a new sample to {output_dir}")
 
             logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
             accelerator.log({"training_loss": loss.detach().item()}, step=step)
@@ -807,10 +664,7 @@ def main(
             global_step,
             accelerator,
             accelerator.unwrap_model(unet),
-            accelerator.unwrap_model(text_encoder),
             vae,
-            accelerator.unwrap_model(sig1),
-            accelerator.unwrap_model(sig2),
             output_dir,
             is_checkpoint=False,
             save_pretrained_model=save_pretrained_model
@@ -818,76 +672,188 @@ def main(
     accelerator.end_training()
 
 
-def eval(pipeline, vae_processor, sig1, sig2, validation_data, out_file, index, forward_t=25, preview=True):
+def remove_noise(
+        scheduler,
+        original_samples: torch.FloatTensor,
+        noise: torch.FloatTensor,
+        timesteps: torch.IntTensor,
+) -> torch.FloatTensor:
+    # Make sure alphas_cumprod and timestep have same device and dtype as original_samples
+    alphas_cumprod = scheduler.alphas_cumprod.to(device=original_samples.device, dtype=original_samples.dtype)
+    timesteps = timesteps.to(original_samples.device)
+
+    sqrt_alpha_prod = alphas_cumprod[timesteps] ** 0.5
+    sqrt_alpha_prod = sqrt_alpha_prod.flatten()
+    while len(sqrt_alpha_prod.shape) < len(original_samples.shape):
+        sqrt_alpha_prod = sqrt_alpha_prod.unsqueeze(-1)
+
+    sqrt_one_minus_alpha_prod = (1 - alphas_cumprod[timesteps]) ** 0.5
+    sqrt_one_minus_alpha_prod = sqrt_one_minus_alpha_prod.flatten()
+    while len(sqrt_one_minus_alpha_prod.shape) < len(original_samples.shape):
+        sqrt_one_minus_alpha_prod = sqrt_one_minus_alpha_prod.unsqueeze(-1)
+
+    removed = (original_samples - sqrt_one_minus_alpha_prod * noise) / sqrt_alpha_prod
+    return removed
+
+
+def finetune_unet(accelerator, batch, use_offset_noise,
+                  cache_latents, vae, rescale_schedule, offset_noise_strength,
+                  unet, sig1, sig2, sig3, noise_scheduler,
+                  motion_mask):
+    vae.eval()
+    dtype = vae.dtype
+    # Convert videos to latent space
+    pixel_values = batch["pixel_values"].to(dtype)
+    bsz, num_frames = pixel_values.shape[:2]
+
+    if not cache_latents:
+        latents = tensor_to_vae_latent(pixel_values, vae)
+    else:
+        latents = pixel_values
+    # Get video length
+    video_length = latents.shape[2]
+    condition_latent = latents[:, :, 0:1].detach().clone()
+
+    # if motion_mask:
+    #     latents = freeze * (1 - mask) + latents * mask
+    # motion = batch["motion"]
+    # latent_motion = calculate_latent_motion_score(latents)
+    # Sample noise that we'll add to the latents
+    use_offset_noise = use_offset_noise and not rescale_schedule
+    noise = sample_noise(latents, offset_noise_strength, use_offset_noise)
+
+    # Sample a random timestep for each video
+    timesteps = torch.randint(0, noise_scheduler.config.num_train_timesteps, (bsz,), device=latents.device)
+    timesteps = timesteps.long()
+
+    # Add noise to the latents according to the noise magnitude at each timestep
+    # (this is the forward diffusion process)
+    noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
+
+    signal_values = batch['signal_values'].float().half()  # [B, FPS, 512]
+    signal_values = torch.nan_to_num(signal_values, nan=0.0)
+
+    signal_encoder = sig1.to(latents.device)
+    signal_encoder2 = sig2.to(latents.device)
+    signal_encoder3 = sig3.to(latents.device)
+
+    bsz = signal_values.size(0)
+    fps = signal_values.size(1)
+
+    # Encode text embeddings
+    # token_ids = batch['prompt_ids']
+    # signal_encoder = LatentSignalEncoder(output_dim=1024).to(latents.device)
+
+    signal_values_resized = rearrange(signal_values, 'b f c-> b (f c)')
+    # print(signal_values.size())
+    signal_embeddings = signal_encoder(signal_values_resized)
+    signal_embeddings = signal_embeddings.reshape(bsz, 1, -1)
+
+    signal_embeddings2 = signal_encoder2(signal_values)
+    # print("signal_embeddings2", signal_embeddings2.size())
+
+    signal_embeddings2 = rearrange(signal_embeddings2, 'b f (c h w)-> (b f) c h w', c=1,
+                                   h=100, w=100)  # [B, FPS, 32]
+    # print("after signal_embeddings2", signal_embeddings2.size())
+    # signal_values torch.Size([2, 25, 512])
+    # signal_embeddings2 torch.Size([2, 25, 10000])
+    # after signal_embeddings2 torch.Size([2, 25, 1, 100, 100])
+    signal_embeddings2 = F.interpolate(signal_embeddings2, size=(noisy_latents.size(-2), noisy_latents.size(-1)),
+                                       mode='bilinear')
+    signal_embeddings2 = rearrange(signal_embeddings2, '(b f) c h w-> b f c h w', b=bsz)  # [B, FPS, 32]
+
+    # mask = batch["mask"]
+    # mask = mask.div(255).to(dtype)
+
+    # noisy_latents:  torch.Size([8, 4, 20, 64, 64])
+    # mask = rearrange(mask, 'b h w -> b 1 1 h w')
+    # mask = repeat(mask, 'b 1 1 h w -> (t b) 1 f h w', t=sample.shape[0] // mask.shape[0], f=sample.shape[2])
+    # noisy_latents = torch.cat([mask, noisy_latents], dim=1)
+    # freeze = repeat(condition_latent, 'b c 1 h w -> b c f h w', f=video_length)
+    signal_embeddings3 = signal_encoder3(signal_values_resized).half()  # signal_embeddings2 = [8, 20, 64x64]
+    # torch.Size([8, 1, 20, 64, 64]) torch.Size([8, 4096])
+    # print(signal_embeddings2.size(), signal_embeddings3.size())
+    signal_embeddings3 = rearrange(signal_embeddings3, 'b (c f h w)-> b c f h w', c=1, f=1,
+                                   h=noisy_latents.size(-2), w=noisy_latents.size(-1))  # [B, FPS, 32]
+
+    # encoder_hidden_states = torch.cat((image_embeddings, signal_embeddings), dim=2)
+    encoder_hidden_states = signal_embeddings
+    uncond_hidden_states = torch.zeros_like(encoder_hidden_states)
+
+    mask = torch.cat((signal_embeddings2, signal_embeddings3), dim=2)
+    # signal_embeddings2 -> [b, 1, f, h, w]
+
+    # encoder_hidden_states = text_encoder(token_ids)[0]
+    # uncond_hidden_states = text_encoder(uncond_input)[0]
+    # Get the target for loss depending on the prediction type
+    if noise_scheduler.config.prediction_type == "epsilon":
+        target = noise
+
+    elif noise_scheduler.config.prediction_type == "v_prediction":
+        target = noise_scheduler.get_velocity(latents, noise, timesteps)
+
+    else:
+        raise ValueError(f"Unknown prediction type {noise_scheduler.prediction_type}")
+
+    if random.random() < 0.15:
+        encoder_hidden_states = uncond_hidden_states
+
+    accelerator.wait_for_everyone()
+    model_pred = unet(noisy_latents, timesteps, condition_latent=condition_latent, mask=mask,
+                      encoder_hidden_states=encoder_hidden_states, motion=None).sample
+    loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+
+    return loss, latents
+
+
+def eval(pipeline, vae_processor, sig1, sig2, sig3, validation_data, out_file, index, forward_t=25, preview=True):
     vae = pipeline.vae
+    diffusion_scheduler = pipeline.scheduler
     device = vae.device
     dtype = vae.dtype
 
-    diffusion_scheduler = pipeline.scheduler
-    diffusion_scheduler.set_timesteps(validation_data.num_inference_steps, device=device)
-
-    # prompt = validation_data.prompt
-    # scale = math.sqrt(width * height / (validation_data.height * validation_data.width))
-    # block_size = 64
-    # validation_data.height = round(height / scale / block_size) * block_size
-    # validation_data.width = round(width / scale / block_size) * block_size
-
-    # out_mask_path = os.path.splitext(out_file)[0] + "_mask.jpg"
-    # Image.fromarray(np_mask).save(out_mask_path)
-    motion_mask = pipeline.unet.config.in_channels == 9
-
-    # prepare inital latents
-    initial_latents = None
-
     for image, signal in zip(validation_data.prompt_image, validation_data.signal):
-        # print(out_file)
-        # print(image)
         image_replaced = image.replace("frame", str(index)+"_frame").replace('.jpg', '.gif')
         target_file = out_file + image_replaced
-        # print(out_file)
-        # print(image_replaced)
         directory = os.path.dirname(target_file)
         # Create the directory if it doesn't exist
         os.makedirs(directory, exist_ok=True)
 
+        # prompt = validation_data.prompt
+        signal = torch.load(signal, map_location="cuda:0", weights_only=True).to(dtype).to(device)
+
         pimg = Image.open(image)
         if pimg.mode == "RGBA":
             pimg = pimg.convert("RGB")
-        signal = torch.load(signal, map_location="cuda:0", weights_only=True).to(dtype).to(device)
+        width, height = pimg.size
+        scale = math.sqrt(width * height / (validation_data.height * validation_data.width))
+        validation_data.height = round(height / scale / 8) * 8
+        validation_data.width = round(width / scale / 8) * 8
+        input_image = vae_processor.preprocess(pimg, validation_data.height, validation_data.width)
+        input_image = input_image.unsqueeze(0).to(dtype).to(device)
+        input_image_latents = tensor_to_vae_latent(input_image, vae)
 
+        initial_latents, timesteps = DDPM_forward_timesteps(input_image_latents, forward_t, validation_data.num_frames,
+                                                            diffusion_scheduler)
         with torch.no_grad():
-            if motion_mask:
-                # h, w = validation_data.height // pipeline.vae_scale_factor, validation_data.width // pipeline.vae_scale_factor
-                # initial_latents = torch.randn([1, validation_data.num_frames, 4, h, w], dtype=dtype, device=device)
-                # mask = T.ToTensor()(np_mask).to(dtype).to(device)
-                # mask = T.Resize([h, w], antialias=False)(mask)
-                video_frames = MaskStableVideoDiffusionPipeline.__call__(
-                    pipeline,
-                    image=pimg,
-                    width=validation_data.width,
-                    height=validation_data.height,
-                    num_frames=validation_data.num_frames,
-                    num_inference_steps=validation_data.num_inference_steps,
-                    decode_chunk_size=validation_data.decode_chunk_size,
-                    fps=validation_data.fps,
-                    motion_bucket_id=validation_data.motion_bucket_id,
-                    mask=None,
-                    signal=signal,
-                    sig1=sig1,
-                    sig2=sig2
-                ).frames[0]
-            else:
-                video_frames = pipeline(
-                    image=pimg,
-                    width=validation_data.width,
-                    height=validation_data.height,
-                    num_frames=validation_data.num_frames,
-                    num_inference_steps=validation_data.num_inference_steps,
-                    fps=validation_data.fps,
-                    decode_chunk_size=validation_data.decode_chunk_size,
-                    motion_bucket_id=validation_data.motion_bucket_id,
-                ).frames[0]
-
+            video_frames, video_latents = pipeline(
+                # prompt=None,
+                latents=initial_latents,
+                width=validation_data.width,
+                height=validation_data.height,
+                num_frames=validation_data.num_frames,
+                num_inference_steps=validation_data.num_inference_steps,
+                guidance_scale=validation_data.guidance_scale,
+                condition_latent=input_image_latents,
+                signal=signal,
+                sig1=sig1,
+                sig2=sig2,
+                sig3=sig3,
+                # mask=mask,
+                # motion=None,
+                return_dict=False,
+                timesteps=timesteps,
+            )
         if preview:
             fps = validation_data.get('fps', 8)
             imageio.mimwrite(target_file, video_frames, duration=int(1000 / fps), loop=0)
@@ -897,41 +863,86 @@ def eval(pipeline, vae_processor, sig1, sig2, validation_data, out_file, index, 
             wandb.log({image: wandb.Video(target_file.replace('.gif', '.mp4'),
                                                     caption=target_file.replace('.gif', '.mp4'), fps=fps, format="mp4")})
 
-    return 0
+        # real_motion_strength = calculate_latent_motion_score(video_latents).cpu().numpy()[0]
+        # precision = calculate_motion_precision(video_frames, np_mask)
+
+    del pipeline
+    torch.cuda.empty_cache()
+    return True
 
 
-def main_eval(
-        pretrained_model_path: str,
-        validation_data: Dict,
-        seed: Optional[int] = None,
-        eval_file=None,
-        **kwargs
-):
-    if seed is not None:
-        set_seed(seed)
-    # Load scheduler, tokenizer and models.
-    pipeline, tokenizer, feature_extractor, train_scheduler, vae_processor, text_encoder, vae, unet = load_primary_models(
-        pretrained_model_path, eval=True)
-    device = torch.device("cuda")
-    pipeline.to(device)
+def batch_eval(unet, vae, vae_processor, pretrained_model_path, sig1, sig2, sig3,
+               validation_data, output_dir, preview, global_step=0, iters=6, eval_file=None):
+    device = vae.device
+    dtype = vae.dtype
+    unet.eval()
+    pipeline = LatentToVideoPipeline.from_pretrained(
+        pretrained_model_path,
+        text_encoder=None,
+        tokenizer=None,
+        vae=vae,
+        unet=unet
+    )
 
+    diffusion_scheduler = DPMSolverMultistepScheduler.from_config(pipeline.scheduler.config)
+    diffusion_scheduler.set_timesteps(validation_data.num_inference_steps, device=device)
+    pipeline.scheduler = diffusion_scheduler
+
+    motion_errors = []
+    motion_precisions = []
     if eval_file is not None:
         eval_list = json.load(open(eval_file))
     else:
         eval_list = [[validation_data.prompt_image, validation_data.prompt]]
 
-    output_dir = "output/svd_out"
+    output_dir = "output/animate_svd_signal"
     iters = 5
     for example in eval_list:
         for t in range(iters):
             name, prompt = example
+            # name = os.path.basename(validation_data.prompt_image)
             out_file_dir = f"{output_dir}/{name.split('.')[0]}"
-            os.makedirs(out_file_dir, exist_ok=True)
-            out_file = f"{out_file_dir}/{t}.gif"
-            validation_data.prompt_image = name
-            validation_data.prompt = prompt
-            eval(pipeline, vae_processor, validation_data, out_file, t)
+            out_file = f"{output_dir}/samples/"
+            os.makedirs(out_file, exist_ok=True)
+
+            eval(pipeline, vae_processor, sig1, sig2, sig3, validation_data, out_file, t,
+                 forward_t=validation_data.num_inference_steps, preview=preview)
             print("save file", out_file)
+
+    del pipeline
+
+
+def main_eval(
+        pretrained_model_path: str,
+        validation_data: Dict,
+        enable_xformers_memory_efficient_attention: bool = True,
+        enable_torch_2_attn: bool = False,
+        seed: Optional[int] = None,
+        **kwargs
+):
+    if seed is not None:
+        set_seed(seed)
+    # Load scheduler, tokenizer and models.
+    noise_scheduler, vae, unet, sig1, sig2, sig3 = load_primary_models(pretrained_model_path)
+    vae_processor = VaeImageProcessor()
+    # Freeze any necessary models
+    # freeze_models([vae, text_encoder, unet])
+    freeze_models([vae, unet])
+
+    # Enable xformers if available
+    handle_memory_attention(enable_xformers_memory_efficient_attention, enable_torch_2_attn, unet)
+
+    # Enable VAE slicing to save memory.
+    vae.enable_slicing()
+
+    # For mixed precision training we cast the text_encoder and vae weights to half-precision
+    # as these models are only used for inference, keeping weights in full precision is not required.
+    weight_dtype = torch.half
+
+    # Move text encoders, and VAE to GPU
+    models_to_cast = [unet, vae]
+    cast_to_gpu_and_type(models_to_cast, torch.device("cuda"), weight_dtype)
+    batch_eval(unet, vae, vae_processor, pretrained_model_path, sig1, sig2, sig3, validation_data, "output/demo", True)
 
 
 if __name__ == "__main__":

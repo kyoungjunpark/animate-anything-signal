@@ -12,7 +12,7 @@ from diffusers.loaders import LoraLoaderMixin, TextualInversionLoaderMixin
 from diffusers.utils.torch_utils import randn_tensor
 
 from models.layerdiffuse_VAE import LatentSignalEncoder
-
+import torch.nn.functional as F
 
 class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
     @torch.no_grad()
@@ -233,9 +233,14 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         # [B, FPS, 512] -> [B * FPS, 512]
         signal_values_resized = rearrange(signal_values, 'b f c-> b (f c)', b=batch_size)
 
-        # print("signal_values_resized", signal_values.size())
-        signal_embeddings = signal_encoder(signal_values_resized).to(latents.device)
-        signal_embeddings = signal_embeddings.reshape(batch_size, 1, -1)
+        # print("signal_values_resized", signal_values_resized.size())
+        try:
+            signal_embeddings = signal_encoder(signal_values_resized).to(latents.device)
+            signal_embeddings = signal_embeddings.reshape(batch_size, 1, -1)
+        except Exception as e:
+            print(signal_values.size())
+            print(frame_range, frame_step, frame_range_indices)
+            raise e
         # print("signal_embeddings", signal_embeddings.size())
 
         # signal_embeddings = rearrange(signal_embeddings, '(b f) c-> b f c', b=bsz)  # [B, FPS, 32]

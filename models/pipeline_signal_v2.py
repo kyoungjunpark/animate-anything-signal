@@ -211,8 +211,9 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
 
         signal_values = torch.nan_to_num(signal_values, nan=0.0)
         target_fps = 25
+
         native_fps = 20
-        sample_fps = fps
+        sample_fps = fps + 1
         frame_step = max(1, round(native_fps / sample_fps))
 
         frame_range = range(0, signal_values.size(0), frame_step)
@@ -239,6 +240,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
             signal_embeddings = signal_embeddings.reshape(batch_size, 1, -1)
         except Exception as e:
             print(signal_values.size())
+            print(frame_range, frame_step, frame_range_indices)
             raise e
         # print("signal_embeddings", signal_embeddings.size())
 
