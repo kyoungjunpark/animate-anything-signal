@@ -594,7 +594,7 @@ def main(
                 if step % gradient_accumulation_steps == 0:
                     progress_bar.update(1)
                 continue
-            with accelerator.accumulate(unet):
+            with accelerator.accumulate(unet), accelerator.accumulate(sig1), accelerator.accumulate(sig2), accelerator.accumulate(sig3):
                 with accelerator.autocast():
                     loss, latents = finetune_unet(accelerator, batch, use_offset_noise, cache_latents, vae,
                                                   rescale_schedule, offset_noise_strength,
