@@ -760,7 +760,7 @@ def finetune_unet(accelerator, batch, use_offset_noise,
     # after signal_embeddings2 torch.Size([2, 25, 1, 100, 100])
     signal_embeddings2 = F.interpolate(signal_embeddings2, size=(noisy_latents.size(-2), noisy_latents.size(-1)),
                                        mode='bilinear')
-    signal_embeddings2 = rearrange(signal_embeddings2, '(b f) c h w-> b f c h w', b=bsz)  # [B, FPS, 32]
+    signal_embeddings2 = rearrange(signal_embeddings2, '(b f) c h w-> b c f h w', b=bsz)  # [B, FPS, 32]
 
     # mask = batch["mask"]
     # mask = mask.div(255).to(dtype)
@@ -780,7 +780,7 @@ def finetune_unet(accelerator, batch, use_offset_noise,
         # after signal_embeddings2 torch.Size([2, 25, 1, 100, 100])
         signal_embeddings3 = F.interpolate(signal_embeddings3, size=(noisy_latents.size(-2), noisy_latents.size(-1)),
                                            mode='bilinear')
-        signal_embeddings3 = rearrange(signal_embeddings3, '(b f) c h w-> b f c h w', b=bsz)  # [B, FPS, 32]
+        signal_embeddings3 = rearrange(signal_embeddings3, '(b f) c h w-> b c f h w', b=bsz, f=fps)  # [B, FPS, 32]
 
     except Exception as e:
         print(signal_values_resized.size())
@@ -792,9 +792,10 @@ def finetune_unet(accelerator, batch, use_offset_noise,
     encoder_hidden_states = signal_embeddings
     uncond_hidden_states = torch.zeros_like(encoder_hidden_states)
     print("mask", signal_embeddings2.size(), signal_embeddings3.size())
+    # mask torch.Size([2, 25, 1, 64, 64]) torch.Size([2, 25, 1, 64, 64])
     mask = torch.cat((signal_embeddings2, signal_embeddings3), dim=2)
     # signal_embeddings2 -> [b, 1, f, h, w]
-
+    mask = signal_embeddings2
     # encoder_hidden_states = text_encoder(token_ids)[0]
     # uncond_hidden_states = text_encoder(uncond_input)[0]
     # Get the target for loss depending on the prediction type
