@@ -7,7 +7,7 @@ pretrained_model_path: "pretrained"
 # pretrained_model_path: "stabilityai/stable-video-diffusion-img2vid-xt"
 
 
-motion_mask: False
+motion_mask: True
 motion_strength: False
 
 # The folder where your training outputs will be placed.
@@ -115,15 +115,15 @@ lora_rank: 16
 
 # Training data parameters
 train_data:
-  width: 482
-  height: 482
+  width: 512
+  height: 512
   use_bucketing: False
   return_mask: True
   return_motion: True
   sample_start_idx: 1
-  fps: 8
-  n_sample_frames: 20
-  json_path: '/home/aiscuser/animate-anything-signal/example/signal_2_4_vlip.json'
+  fps: 6
+  n_sample_frames: 25
+  json_path: '/home/aiscuser/animate-anything-signal/example/signal_2_4_new_vlip.json'
 
 # Validation data parameters.
 validation_data:
@@ -137,11 +137,11 @@ validation_data:
   sample_preview: True
 
   # The number of frames to sample during validation.
-  num_frames: 20
+  num_frames: 25
 
   # Height and width of validation sample.
-  width: 482
-  height: 482
+  width: 512
+  height: 512
   # 512 -> 55
   # 480 -> 60
   # 482 ->
