@@ -212,7 +212,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         signal_values = torch.nan_to_num(signal_values, nan=0.0)
         target_fps = 25
         native_fps = 20
-        sample_fps = num_frames
+        sample_fps = fps
         frame_step = max(1, round(native_fps / sample_fps))
 
         frame_range = range(0, signal_values.size(0), frame_step)

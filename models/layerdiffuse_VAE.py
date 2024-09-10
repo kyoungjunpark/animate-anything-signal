@@ -76,7 +76,7 @@ class SignalResizeEncoder(torch.nn.Module):
 
 
 class LatentSignalEncoder(torch.nn.Module):
-    def __init__(self, input_dim=512, hidden_dims=[1024, 512, 256, 128, 64], output_dim=32, dropout_prob=0.3):
+    def __init__(self, input_dim=512, hidden_dims=[512, 256, 128, 64], output_dim=32, dropout_prob=0.3):
         super(LatentSignalEncoder, self).__init__()
 
         # Create a list of layers
