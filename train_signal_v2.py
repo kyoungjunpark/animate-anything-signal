@@ -323,7 +323,7 @@ def save_pipe(
 
     sig1_out = copy.deepcopy(sig1)
     sig2_out = copy.deepcopy(sig2)
-    sig23out = copy.deepcopy(sig3)
+    sig3_out = copy.deepcopy(sig3)
 
     if save_pretrained_model:
         pipeline.save_pretrained(save_path)
@@ -749,7 +749,7 @@ def finetune_unet(accelerator, batch, use_offset_noise,
     signal_embeddings = signal_encoder(signal_values_resized)
     signal_embeddings = signal_embeddings.reshape(bsz, 1, -1)
 
-    signal_embeddings2 = signal_encoder2(signal_values)
+    signal_embeddings2 = signal_encoder2(signal_values).half()
     # print("signal_embeddings2", signal_embeddings2.size())
 
     signal_embeddings2 = rearrange(signal_embeddings2, 'b f (c h w)-> (b f) c h w', c=1,
@@ -770,16 +770,28 @@ def finetune_unet(accelerator, batch, use_offset_noise,
     # mask = repeat(mask, 'b 1 1 h w -> (t b) 1 f h w', t=sample.shape[0] // mask.shape[0], f=sample.shape[2])
     # noisy_latents = torch.cat([mask, noisy_latents], dim=1)
     # freeze = repeat(condition_latent, 'b c 1 h w -> b c f h w', f=video_length)
-    signal_embeddings3 = signal_encoder3(signal_values_resized).half()  # signal_embeddings2 = [8, 20, 64x64]
+    try:
+        signal_embeddings3 = signal_encoder3(signal_values).half()  # signal_embeddings2 = [8, 20, 64x64]
+        signal_embeddings3 = rearrange(signal_embeddings3, 'b f (c h w)-> (b f) c h w', c=1,
+                                       h=100, w=100)  # [B, FPS, 32]
+        # print("after signal_embeddings2", signal_embeddings2.size())
+        # signal_values torch.Size([2, 25, 512])
+        # signal_embeddings2 torch.Size([2, 25, 10000])
+        # after signal_embeddings2 torch.Size([2, 25, 1, 100, 100])
+        signal_embeddings3 = F.interpolate(signal_embeddings3, size=(noisy_latents.size(-2), noisy_latents.size(-1)),
+                                           mode='bilinear')
+        signal_embeddings3 = rearrange(signal_embeddings3, '(b f) c h w-> b f c h w', b=bsz)  # [B, FPS, 32]
+
+    except Exception as e:
+        print(signal_values_resized.size())
+        raise e
     # torch.Size([8, 1, 20, 64, 64]) torch.Size([8, 4096])
     # print(signal_embeddings2.size(), signal_embeddings3.size())
-    signal_embeddings3 = rearrange(signal_embeddings3, 'b (c f h w)-> b c f h w', c=1, f=1,
-                                   h=noisy_latents.size(-2), w=noisy_latents.size(-1))  # [B, FPS, 32]
 
     # encoder_hidden_states = torch.cat((image_embeddings, signal_embeddings), dim=2)
     encoder_hidden_states = signal_embeddings
     uncond_hidden_states = torch.zeros_like(encoder_hidden_states)
-
+    print("mask", signal_embeddings2.size(), signal_embeddings3.size())
     mask = torch.cat((signal_embeddings2, signal_embeddings3), dim=2)
     # signal_embeddings2 -> [b, 1, f, h, w]
 
