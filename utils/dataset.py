@@ -897,7 +897,7 @@ class CachedDataset(Dataset):
 
 def get_train_dataset(dataset_types, train_data, tokenizer=None):
     train_datasets = []
-    dataset_cls = [VideoJsonDataset, SingleVideoDataset, ImageDataset, VideoFolderDataset, VideoBLIPDataset]
+    dataset_cls = [VideoJsonDataset, SingleVideoDataset, ImageDataset, VideoFolderDataset, VideoBLIPDataset, VideoBLIPDataset_V2]
     dataset_map = {d.__getname__(): d for d in dataset_cls}
 
     # Loop through all available datasets, get the name, then add to list of data to process.

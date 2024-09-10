@@ -40,7 +40,7 @@ from diffusers.models.attention import BasicTransformerBlock
 from diffusers.pipelines.stable_video_diffusion.pipeline_stable_video_diffusion import _resize_with_antialiasing
 
 from models.layerdiffuse_VAE import LatentSignalEncoder
-from models.pipeline_stable_video_diffusion import StableVideoDiffusionPipeline
+# from models.pipeline_stable_video_diffusion import StableVideoDiffusionPipeline
 from utils.dataset import get_train_dataset, extend_datasets
 from einops import rearrange, repeat
 import imageio
@@ -85,10 +85,10 @@ def create_output_folders(output_dir, config):
 
 def load_primary_models(pretrained_model_path, eval=False):
     if eval:
-        pipeline = StableVideoDiffusionPipeline.from_pretrained(pretrained_model_path, torch_dtype=torch.float16,
+        pipeline = MaskStableVideoDiffusionPipeline.from_pretrained(pretrained_model_path, torch_dtype=torch.float16,
                                                                 variant='fp16')
     else:
-        pipeline = StableVideoDiffusionPipeline.from_pretrained(pretrained_model_path)
+        pipeline = MaskStableVideoDiffusionPipeline.from_pretrained(pretrained_model_path)
     fps = 25
     CHIRP_LEN = 512
     encoder_hidden_dim = 1024
@@ -105,14 +105,14 @@ def load_primary_models(pretrained_model_path, eval=False):
 
 
 def convert_svd(pretrained_model_path, out_path):
-    pipeline = StableVideoDiffusionPipeline.from_pretrained(pretrained_model_path)
+    pipeline = MaskStableVideoDiffusionPipeline.from_pretrained(pretrained_model_path)
 
     unet = UNetSpatioTemporalConditionModel.from_pretrained(
         pretrained_model_path, subfolder="unet_mask", low_cpu_mem_usage=False, ignore_mismatched_sizes=True)
     unet.conv_in.bias.data = copy.deepcopy(pipeline.unet.conv_in.bias)
     torch.nn.init.zeros_(unet.conv_in.weight)
     unet.conv_in.weight.data[:, 1:] = copy.deepcopy(pipeline.unet.conv_in.weight)
-    new_pipeline = StableVideoDiffusionPipeline.from_pretrained(
+    new_pipeline = MaskStableVideoDiffusionPipeline.from_pretrained(
         pretrained_model_path, unet=unet)
     new_pipeline.save_pretrained(out_path)
 
@@ -345,7 +345,7 @@ def save_pipe(
         save_path = output_dir
 
     unet_out = copy.deepcopy(unet)
-    pipeline = StableVideoDiffusionPipeline.from_pretrained(
+    pipeline = MaskStableVideoDiffusionPipeline.from_pretrained(
         path, unet=unet_out).to(torch_dtype=torch.float32)
 
     sig1_out = copy.deepcopy(sig1)
@@ -637,7 +637,7 @@ def main(
     train_datasets = get_train_dataset(dataset_types, train_data, tokenizer)
 
     # If you have extra train data, you can add a list of however many you would like.
-    # Eg: extra_train_data: [{: {dataset_types, train_data: {etc...}}}] 
+    # Eg: extra_train_data: [{: {dataset_types, train_data: {etc...}}}]
     try:
         if extra_train_data is not None and len(extra_train_data) > 0:
             for dataset in extra_train_data:
