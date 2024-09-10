@@ -354,6 +354,9 @@ class LatentToVideoPipeline(TextToVideoSDPipeline):
             callback=None,
             callback_steps: int = 1,
             signal=None,
+            sig1=None,
+            sig2=None,
+            sig3=None,
             cross_attention_kwargs=None,
             condition_latent=None,
             mask=None,
@@ -448,14 +451,80 @@ class LatentToVideoPipeline(TextToVideoSDPipeline):
         do_classifier_free_guidance = guidance_scale > 1.0
         # 3. Encode input signal
         # signal [FPS, 512]
-        signal_values = torch.nan_to_num(signal, nan=0.0)  # signal_values torch.Size([154, 512])
-        signal_values = signal_values[0:num_frames, :]
-        signal_values = rearrange(signal_values, '(b f) c-> b f c', b=batch_size)
+        signal_values = signal.float().half()  # [FPS, 512]
 
-        signal_encoder = LatentSignalEncoder(output_dim=1024)
-        signal_embeddings = signal_encoder(signal_values).half().to(latents.device)
-        # print(signal_embeddings.size()) # torch.Size([154, 1024])
-        # signal_embeddings = rearrange(signal_embeddings, '(b f) c-> b f c', b=batch_size)  # [B, FPS, 32]
+        signal_values = torch.nan_to_num(signal_values, nan=0.0)
+        target_fps = 25
+
+        native_fps = 20
+        sample_fps = num_frames
+        frame_step = max(1, round(native_fps / sample_fps))
+
+        frame_range = range(0, signal_values.size(0), frame_step)
+        frame_range_indices = list(frame_range)[:target_fps]
+
+        signal_values = signal_values[frame_range_indices, :]
+
+        signal_values = signal_values.unsqueeze(0)
+        # print("unsqueeze", signal_values.size())
+
+        # signal_encoder = LatentSignalEncoder(input_dim=signal_values.size(-1) * signal_values.size(-2), output_dim=1024).to(device)
+        # signal_encoder2 = LatentSignalEncoder(output_dim=latents.size(-1) * latents.size(-2)).to(device)
+        signal_encoder = sig1
+        signal_encoder2 = sig2
+        signal_encoder3 = sig3
+
+        bsz = signal_values.size(0)
+        fps = signal_values.size(1)
+
+        # Encode text embeddings
+        # token_ids = batch['prompt_ids']
+        # signal_encoder = LatentSignalEncoder(output_dim=1024).to(latents.device)
+
+        signal_values_resized = rearrange(signal_values, 'b f c-> b (f c)')
+        # print(signal_values.size())
+        signal_embeddings = signal_encoder(signal_values_resized)
+        signal_embeddings = signal_embeddings.reshape(bsz, 1, -1)
+
+        signal_embeddings2 = signal_encoder2(signal_values).half()
+        # print("signal_embeddings2", signal_embeddings2.size())
+
+        signal_embeddings2 = rearrange(signal_embeddings2, 'b f (c h w)-> (b f) c h w', c=1,
+                                       h=100, w=100)  # [B, FPS, 32]
+        # print("after signal_embeddings2", signal_embeddings2.size())
+        # signal_values torch.Size([2, 25, 512])
+        # signal_embeddings2 torch.Size([2, 25, 10000])
+        # after signal_embeddings2 torch.Size([2, 25, 1, 100, 100])
+        signal_embeddings2 = F.interpolate(signal_embeddings2, size=(latents.size(-2), latents.size(-1)),
+                                           mode='bilinear')
+        signal_embeddings2 = rearrange(signal_embeddings2, '(b f) c h w-> b f c h w', b=bsz)  # [B, FPS, 32]
+
+        # mask = batch["mask"]
+        # mask = mask.div(255).to(dtype)
+
+        # noisy_latents:  torch.Size([8, 4, 20, 64, 64])
+        # mask = rearrange(mask, 'b h w -> b 1 1 h w')
+        # mask = repeat(mask, 'b 1 1 h w -> (t b) 1 f h w', t=sample.shape[0] // mask.shape[0], f=sample.shape[2])
+        # noisy_latents = torch.cat([mask, noisy_latents], dim=1)
+        # freeze = repeat(condition_latent, 'b c 1 h w -> b c f h w', f=video_length)
+        try:
+            signal_embeddings3 = signal_encoder3(signal_values).half()  # signal_embeddings2 = [8, 20, 64x64]
+            signal_embeddings3 = rearrange(signal_embeddings3, 'b f (c h w)-> (b f) c h w', c=1,
+                                           h=100, w=100)  # [B, FPS, 32]
+            # print("after signal_embeddings2", signal_embeddings2.size())
+            # signal_values torch.Size([2, 25, 512])
+            # signal_embeddings2 torch.Size([2, 25, 10000])
+            # after signal_embeddings2 torch.Size([2, 25, 1, 100, 100])
+            signal_embeddings3 = F.interpolate(signal_embeddings3,
+                                               size=(latents.size(-2), latents.size(-1)),
+                                               mode='bilinear')
+            signal_embeddings3 = rearrange(signal_embeddings3, '(b f) c h w-> b f c h w', b=bsz)  # [B, FPS, 32]
+
+        except Exception as e:
+            print(signal_values_resized.size())
+            raise e
+        # torch.Size([8, 1, 20, 64, 64]) torch.Size([8, 4096])
+        # print(signal_embeddings2.size(), signal_embeddings3.size())
 
         encoder_hidden_states = signal_embeddings
 
@@ -463,25 +532,6 @@ class LatentToVideoPipeline(TextToVideoSDPipeline):
             [encoder_hidden_states] * 2) if do_classifier_free_guidance else encoder_hidden_states
 
         # latents torch.Size([1, 4, 20, 55, 74])
-
-        # mask
-        signal_encoder2 = LatentSignalEncoder(output_dim=latents.size(-1) * latents.size(-2)).to(
-            latents.device)
-        signal_encoder3 = LatentSignalEncoder(input_dim=signal_values.size(1) * signal_values.size(2),
-                                              output_dim=latents.size(-1) * latents.size(-2)).to(
-            latents.device)
-        signal_embeddings2 = signal_encoder2(signal_values).half().to(
-            latents.device)  # signal_embeddings2 = [8, 20, 64x64]
-        signal_embeddings2 = rearrange(signal_embeddings2, 'b f (c h w)-> b c f h w', c=1,
-                                       h=latents.size(-2), w=latents.size(-1))  # [B, FPS, 32]
-
-        signal_values_tmp = rearrange(signal_values, 'b f c-> b (f c)')  # [B, FPS, 32]
-        signal_embeddings3 = signal_encoder3(signal_values_tmp).half().to(
-            latents.device)  # signal_embeddings2 = [8, 20, 64x64]
-        # torch.Size([8, 1, 20, 64, 64]) torch.Size([8, 4096])
-        # print(signal_embeddings2.size(), signal_embeddings3.size())
-        signal_embeddings3 = rearrange(signal_embeddings3, 'b (c f h w)-> b c f h w', c=1, f=1,
-                                       h=latents.size(-2), w=latents.size(-1))  # [B, FPS, 32]
 
         mask = torch.cat((signal_embeddings2, signal_embeddings3), dim=2)
         mask = torch.cat([mask] * 2) if do_classifier_free_guidance else mask
