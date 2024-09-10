@@ -727,7 +727,7 @@ def finetune_unet(accelerator, batch, use_offset_noise,
 
     # Encode text embeddings
     # token_ids = batch['prompt_ids']
-    signal_values = batch['signal_values'].float()  # [B, FPS, 512]
+    signal_values = torch.real(batch['signal_values']).float()  # [B, FPS, 512]
     signal_values = torch.nan_to_num(signal_values, nan=0.0)
     signal_encoder = LatentSignalEncoder(output_dim=1024).to(latents.device)
     signal_encoder2 = LatentSignalEncoder(output_dim=noisy_latents.size(-1) * noisy_latents.size(-2)).to(latents.device)

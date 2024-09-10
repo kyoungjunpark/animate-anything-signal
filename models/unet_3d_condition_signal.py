@@ -426,8 +426,8 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin):
             # print(mask.size(), sample.size())
             # torch.Size([8, 1, 21, 64, 64]) torch.Size([8, 4, 21, 64, 64])
             # torch.Size([1, 1, 21, 55, 74]) torch.Size([2, 4, 21, 55, 74])
-            print(mask.size(), sample.size()) # torch.Size([2, 25, 2, 64, 64]) torch.Size([2, 4, 26, 64, 64])
-            sample = torch.cat([mask, sample], dim=2)
+            # torch.Size([2, 25, 2, 55, 74]) torch.Size([2, 4, 26, 55, 74])
+            sample = torch.cat([mask, sample], dim=1)
             sample = sample.permute(0, 2, 1, 3, 4).reshape((sample.shape[0] * num_frames, -1) + sample.shape[3:])
             sample = self.conv_in2(sample)
         else:

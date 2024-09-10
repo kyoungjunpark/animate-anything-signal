@@ -645,7 +645,8 @@ def main(
                     if global_step == 1: print("Performing validation prompt.")
                     with accelerator.autocast():
                         batch_eval(accelerator.unwrap_model(unet), vae,
-                                   vae_processor, pretrained_model_path,
+                                   vae_processor, pretrained_model_path, accelerator.unwrap_model(sig1),
+                                   accelerator.unwrap_model(sig2), accelerator.unwrap_model(sig3),
                                    validation_data, f"{output_dir}/samples", True, global_step=global_step, iters=1)
                         logger.info(f"Saved a new sample to {output_dir}")
 
@@ -730,7 +731,7 @@ def finetune_unet(accelerator, batch, use_offset_noise,
     # (this is the forward diffusion process)
     noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
 
-    signal_values = batch['signal_values'].float().half()  # [B, FPS, 512]
+    signal_values = torch.real(batch['signal_values']).float().half()  # [B, FPS, 512]
     signal_values = torch.nan_to_num(signal_values, nan=0.0)
 
     signal_encoder = sig1.to(latents.device)
@@ -770,31 +771,17 @@ def finetune_unet(accelerator, batch, use_offset_noise,
     # mask = repeat(mask, 'b 1 1 h w -> (t b) 1 f h w', t=sample.shape[0] // mask.shape[0], f=sample.shape[2])
     # noisy_latents = torch.cat([mask, noisy_latents], dim=1)
     # freeze = repeat(condition_latent, 'b c 1 h w -> b c f h w', f=video_length)
-    try:
-        signal_embeddings3 = signal_encoder3(signal_values).half()  # signal_embeddings2 = [8, 20, 64x64]
-        signal_embeddings3 = rearrange(signal_embeddings3, 'b f (c h w)-> (b f) c h w', c=1,
-                                       h=100, w=100)  # [B, FPS, 32]
-        # print("after signal_embeddings2", signal_embeddings2.size())
-        # signal_values torch.Size([2, 25, 512])
-        # signal_embeddings2 torch.Size([2, 25, 10000])
-        # after signal_embeddings2 torch.Size([2, 25, 1, 100, 100])
-        signal_embeddings3 = F.interpolate(signal_embeddings3, size=(noisy_latents.size(-2), noisy_latents.size(-1)),
-                                           mode='bilinear')
-        signal_embeddings3 = rearrange(signal_embeddings3, '(b f) c h w-> b c f h w', b=bsz, f=fps)  # [B, FPS, 32]
 
-    except Exception as e:
-        print(signal_values_resized.size())
-        raise e
     # torch.Size([8, 1, 20, 64, 64]) torch.Size([8, 4096])
     # print(signal_embeddings2.size(), signal_embeddings3.size())
 
     # encoder_hidden_states = torch.cat((image_embeddings, signal_embeddings), dim=2)
     encoder_hidden_states = signal_embeddings
     uncond_hidden_states = torch.zeros_like(encoder_hidden_states)
-    print("mask", signal_embeddings2.size(), signal_embeddings3.size())
     # mask torch.Size([2, 25, 1, 64, 64]) torch.Size([2, 25, 1, 64, 64])
-    mask = torch.cat((signal_embeddings2, signal_embeddings3), dim=2)
+    # mask = torch.cat((signal_embeddings2, signal_embeddings3), dim=2)
     # signal_embeddings2 -> [b, 1, f, h, w]
+    signal_embeddings2 = F.pad(signal_embeddings2, (0, 0, 0, 0, 0, 1))
     mask = signal_embeddings2
     # encoder_hidden_states = text_encoder(token_ids)[0]
     # uncond_hidden_states = text_encoder(uncond_input)[0]
@@ -825,6 +812,8 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, validation_data, out_file, i
     device = vae.device
     dtype = vae.dtype
 
+    signal_encoder2 = sig2
+
     for image, signal in zip(validation_data.prompt_image, validation_data.signal):
         image_replaced = image.replace("frame", str(index)+"_frame").replace('.jpg', '.gif')
         target_file = out_file + image_replaced
@@ -839,15 +828,37 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, validation_data, out_file, i
         if pimg.mode == "RGBA":
             pimg = pimg.convert("RGB")
         width, height = pimg.size
-        scale = math.sqrt(width * height / (validation_data.height * validation_data.width))
-        validation_data.height = round(height / scale / 8) * 8
-        validation_data.width = round(width / scale / 8) * 8
+        # scale = math.sqrt(width * height / (validation_data.height * validation_data.width))
+        # validation_data.height = round(height / scale / 8) * 8
+        # validation_data.width = round(width / scale / 8) * 8
         input_image = vae_processor.preprocess(pimg, validation_data.height, validation_data.width)
+
         input_image = input_image.unsqueeze(0).to(dtype).to(device)
         input_image_latents = tensor_to_vae_latent(input_image, vae)
 
         initial_latents, timesteps = DDPM_forward_timesteps(input_image_latents, forward_t, validation_data.num_frames,
                                                             diffusion_scheduler)
+        """
+        signal_values = torch.nan_to_num(signal, nan=0.0)
+        bsz = signal_values.size(0)
+
+        signal_embeddings2 = signal_encoder2(signal_values).half()
+        # print("signal_embeddings2", signal_embeddings2.size())
+
+        signal_embeddings2 = rearrange(signal_embeddings2, 'b f (c h w)-> (b f) c h w', c=1,
+                                       h=100, w=100)  # [B, FPS, 32]
+        # print("after signal_embeddings2", signal_embeddings2.size())
+        # signal_values torch.Size([2, 25, 512])
+        # signal_embeddings2 torch.Size([2, 25, 10000])
+        # after signal_embeddings2 torch.Size([2, 25, 1, 100, 100])
+        signal_embeddings2 = F.interpolate(signal_embeddings2, size=(initial_latents.size(-2), initial_latents.size(-1)),
+                                           mode='bilinear')
+        signal_embeddings2 = rearrange(signal_embeddings2, '(b f) c h w-> b c f h w', b=bsz)  # [B, FPS, 32]
+
+        signal_embeddings2 = F.pad(signal_embeddings2, (0, 0, 0, 0, 0, 1))
+        mask = signal_embeddings2
+        """
+        mask = None
         with torch.no_grad():
             video_frames, video_latents = pipeline(
                 # prompt=None,
@@ -862,7 +873,7 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, validation_data, out_file, i
                 sig1=sig1,
                 sig2=sig2,
                 sig3=sig3,
-                # mask=mask,
+                mask=mask,
                 # motion=None,
                 return_dict=False,
                 timesteps=timesteps,
@@ -903,24 +914,17 @@ def batch_eval(unet, vae, vae_processor, pretrained_model_path, sig1, sig2, sig3
 
     motion_errors = []
     motion_precisions = []
-    if eval_file is not None:
-        eval_list = json.load(open(eval_file))
-    else:
-        eval_list = [[validation_data.prompt_image, validation_data.prompt]]
-
     output_dir = "output/animate_svd_signal"
     iters = 5
-    for example in eval_list:
-        for t in range(iters):
-            name, prompt = example
-            # name = os.path.basename(validation_data.prompt_image)
-            out_file_dir = f"{output_dir}/{name.split('.')[0]}"
-            out_file = f"{output_dir}/samples/"
-            os.makedirs(out_file, exist_ok=True)
+    for t in range(iters):
+        # name = os.path.basename(validation_data.prompt_image)
+        # out_file_dir = f"{output_dir}/{name.split('.')[0]}"
+        out_file = f"{output_dir}/samples/"
+        os.makedirs(out_file, exist_ok=True)
 
-            eval(pipeline, vae_processor, sig1, sig2, sig3, validation_data, out_file, t,
-                 forward_t=validation_data.num_inference_steps, preview=preview)
-            print("save file", out_file)
+        eval(pipeline, vae_processor, sig1, sig2, sig3, validation_data, out_file, t,
+             forward_t=validation_data.num_inference_steps, preview=preview)
+        print("save file", out_file)
 
     del pipeline
 

@@ -434,7 +434,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
                                condition_latent / vae.config.scaling_factor], dim=2)
 
     # Signal embedding
-    signal_values = batch['signal_values'].float().half()  # [B, FPS, 512]
+    signal_values = torch.real(batch['signal_values']).float().half()  # [B, FPS, 512]
     signal_values = torch.nan_to_num(signal_values, nan=0.0)
 
     # signal_encoder = LatentSignalEncoder(input_dim=signal_values.size(-1) * signal_values.size(-2), output_dim=1024).to(device)
