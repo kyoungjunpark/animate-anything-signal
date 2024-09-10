@@ -8,7 +8,6 @@ import random
 import gc
 import copy
 import json
-
 from typing import Dict, Optional, Tuple
 from omegaconf import OmegaConf
 import numpy as np
@@ -53,8 +52,6 @@ from utils.common import read_mask, generate_random_mask, slerp, calculate_motio
 already_printed_trainables = False
 
 logger = get_logger(__name__, log_level="INFO")
-
-wandb.require("core")
 
 
 def create_logging(logging, logger, accelerator):
@@ -106,7 +103,18 @@ def load_primary_models(pretrained_model_path, in_channels=-1):
         unet.conv_in.weight.data[:, in_channels - load_in_channel:] = copy.deepcopy(unet2.conv_in.weight.data)
         del unet2
 
-    return noise_scheduler, vae, unet
+        fps = 25
+        CHIRP_LEN = 512
+        encoder_hidden_dim = 1024
+
+        signal_encoder = LatentSignalEncoder(input_dim=fps * CHIRP_LEN, output_dim=encoder_hidden_dim)
+        # Just large dim for later interpolation
+        input_latents_dim1 = 100
+        input_latents_dim2 = 100
+
+        signal_encoder2 = LatentSignalEncoder(output_dim=input_latents_dim1 * input_latents_dim2)
+
+    return noise_scheduler, vae, unet, signal_encoder, signal_encoder2
 
 
 def unet_and_text_g_c(unet, unet_enable):
@@ -287,6 +295,8 @@ def save_pipe(
         accelerator,
         unet,
         vae,
+        sig1,
+        sig2,
         output_dir,
         is_checkpoint=False,
         save_pretrained_model=True
@@ -309,13 +319,22 @@ def save_pipe(
         vae=vae_out,
     ).to(torch_dtype=torch.float32)
 
+    sig1_out = copy.deepcopy(sig1)
+
+    sig2_out = copy.deepcopy(sig2)
+
     if save_pretrained_model:
         pipeline.save_pretrained(save_path)
+        signal_save_path = save_path + "/signal/"
+        os.makedirs(signal_save_path, exist_ok=True)
+        torch.save(sig1_out.state_dict(), signal_save_path + 'sig1.pth')
+        torch.save(sig2_out.state_dict(), signal_save_path + 'sig2.pth')
 
     logger.info(f"Saved model at {save_path} on step {global_step}")
 
     del pipeline
     del unet_out
+    del sig1_out, sig2_out
     # del text_encoder_out
     del vae_out
     torch.cuda.empty_cache()
@@ -402,7 +421,7 @@ def main(
         output_dir = create_output_folders(output_dir, config)
 
     # Load scheduler, tokenizer and models.
-    noise_scheduler, vae, unet = load_primary_models(pretrained_model_path, in_channels)
+    noise_scheduler, vae, unet, sig1, sig2 = load_primary_models(pretrained_model_path, in_channels)
     vae_processor = VaeImageProcessor()
     # Freeze any necessary models
     freeze_models([vae, unet])
@@ -434,7 +453,7 @@ def main(
         )
 
     optim_params = [
-        param_optim(unet, trainable_modules_available, extra_params=extra_unet_params),
+        param_optim(unet, trainable_modules_available, extra_params=extra_unet_params)
     ]
 
     params = create_optimizer_params(optim_params, learning_rate)
@@ -511,7 +530,7 @@ def main(
     weight_dtype = is_mixed_precision(accelerator)
 
     # Move text encoders, and VAE to GPU
-    models_to_cast = [vae]
+    models_to_cast = [vae, sig1, sig2]
     cast_to_gpu_and_type(models_to_cast, accelerator.device, weight_dtype)
 
     # Fix noise schedules to predcit light and dark areas if available.
@@ -555,6 +574,8 @@ def main(
             accelerator,
             accelerator.unwrap_model(unet),
             vae,
+            accelerator.unwrap_model(sig1),
+            accelerator.unwrap_model(sig2),
             output_dir,
             is_checkpoint=True,
             save_pretrained_model=save_pretrained_model
@@ -573,7 +594,7 @@ def main(
                 with accelerator.autocast():
                     loss, latents = finetune_unet(accelerator, batch, use_offset_noise, cache_latents, vae,
                                                   rescale_schedule, offset_noise_strength,
-                                                  unet, noise_scheduler, motion_mask)
+                                                  unet, sig1, sig2, noise_scheduler, motion_mask)
 
                 device = loss.device
                 # Gather the losses across all processes for logging (if we use distributed training).
@@ -608,6 +629,8 @@ def main(
                         accelerator,
                         accelerator.unwrap_model(unet),
                         vae,
+                        accelerator.unwrap_model(sig1),
+                        accelerator.unwrap_model(sig2),
                         output_dir,
                         is_checkpoint=True,
                         save_pretrained_model=save_pretrained_model

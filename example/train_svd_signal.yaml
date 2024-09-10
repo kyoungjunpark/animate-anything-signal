@@ -154,7 +154,7 @@ train_data:
   path: "/home/aiscuser/locomotion_video_whole_mp4/"
 
   # 'json'
-  json_path: '/home/aiscuser/animate-anything-signal/example/signal_2_4_vlip.json'
+  json_path: '/home/aiscuser/animate-anything-signal/example/signal_2_4_new_vlip.json'
 
   # 'image'
   image_dir: '/vlp/datasets/images/coco'

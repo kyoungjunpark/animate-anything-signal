@@ -360,6 +360,7 @@ def save_pipe(
 
     del pipeline
     del unet_out
+    del sig1_out, sig2_out
     torch.cuda.empty_cache()
     gc.collect()
 
@@ -690,7 +691,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("svd_with_signal_v2_new_data")
+        accelerator.init_trackers("svd_with_signal_v2_new_data_reduced_layers")
         wandb.require("core")
 
     # Train!
@@ -742,7 +743,7 @@ def main(
                     progress_bar.update(1)
                 continue
 
-            with accelerator.accumulate(unet), accelerator.accumulate(text_encoder):
+            with accelerator.accumulate(unet), accelerator.accumulate(sig1), accelerator.accumulate(sig2):
                 with accelerator.autocast():
                     loss = finetune_unet(accelerator, pipeline, batch, use_offset_noise,
                                          rescale_schedule, offset_noise_strength, unet, sig1, sig2, motion_mask)
@@ -783,7 +784,7 @@ def main(
                         save_pretrained_model=save_pretrained_model
                     )
 
-                if should_sample(global_step, validation_steps, validation_data):
+                if should_sample(global_step, validation_steps, validation_data) and accelerator.is_main_process:
                     if global_step == 1: print("Performing validation prompt.")
                     if accelerator.is_main_process:
                         with accelerator.autocast():

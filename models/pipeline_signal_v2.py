@@ -234,8 +234,12 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         signal_values_resized = rearrange(signal_values, 'b f c-> b (f c)', b=batch_size)
 
         # print("signal_values_resized", signal_values_resized.size())
-        signal_embeddings = signal_encoder(signal_values_resized).to(latents.device)
-        signal_embeddings = signal_embeddings.reshape(batch_size, 1, -1)
+        try:
+            signal_embeddings = signal_encoder(signal_values_resized).to(latents.device)
+            signal_embeddings = signal_embeddings.reshape(batch_size, 1, -1)
+        except Exception as e:
+            print(signal_values.size())
+            raise e
         # print("signal_embeddings", signal_embeddings.size())
 
         # signal_embeddings = rearrange(signal_embeddings, '(b f) c-> b f c', b=bsz)  # [B, FPS, 32]
