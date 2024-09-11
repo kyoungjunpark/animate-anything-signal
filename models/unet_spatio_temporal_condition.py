@@ -8,9 +8,9 @@ from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.loaders import UNet2DConditionLoadersMixin
 from diffusers.utils import BaseOutput, logging
 from diffusers.models.attention_processor import CROSS_ATTENTION_PROCESSORS, AttentionProcessor, AttnProcessor
-from diffusers.models.embeddingsimport TimestepEmbedding, Timesteps
+from diffusers.models.embeddings import TimestepEmbedding, Timesteps
 from diffusers.models.modeling_utils import ModelMixin
-from .unet_3d_blocks import UNetMidBlockSpatioTemporal, get_down_block, get_up_block
+from diffusers.models.unet_3d_blocks import UNetMidBlockSpatioTemporal, get_down_block, get_up_block
 
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
@@ -22,17 +22,17 @@ class UNetSpatioTemporalConditionOutput(BaseOutput):
     The output of [`UNetSpatioTemporalConditionModel`].
 
     Args:
-        sample (`torch.Tensor` of shape `(batch_size, num_frames, num_channels, height, width)`):
+        sample (`torch.FloatTensor` of shape `(batch_size, num_frames, num_channels, height, width)`):
             The hidden states output conditioned on `encoder_hidden_states` input. Output of last layer of model.
     """
 
-    sample: torch.Tensor = None
+    sample: torch.FloatTensor = None
 
 
 class UNetSpatioTemporalConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin):
     r"""
-    A conditional Spatio-Temporal UNet model that takes a noisy video frames, conditional state, and a timestep and
-    returns a sample shaped output.
+    A conditional Spatio-Temporal UNet model that takes a noisy video frames, conditional state, and a timestep and returns a sample
+    shaped output.
 
     This model inherits from [`ModelMixin`]. Check the superclass documentation for it's generic methods implemented
     for all models (such as downloading or saving).
@@ -57,9 +57,8 @@ class UNetSpatioTemporalConditionModel(ModelMixin, ConfigMixin, UNet2DConditionL
             The dimension of the cross attention features.
         transformer_layers_per_block (`int`, `Tuple[int]`, or `Tuple[Tuple]` , *optional*, defaults to 1):
             The number of transformer blocks of type [`~models.attention.BasicTransformerBlock`]. Only relevant for
-            [`~models.unets.unet_3d_blocks.CrossAttnDownBlockSpatioTemporal`],
-            [`~models.unets.unet_3d_blocks.CrossAttnUpBlockSpatioTemporal`],
-            [`~models.unets.unet_3d_blocks.UNetMidBlockSpatioTemporal`].
+            [`~models.unet_3d_blocks.CrossAttnDownBlockSpatioTemporal`], [`~models.unet_3d_blocks.CrossAttnUpBlockSpatioTemporal`],
+            [`~models.unet_3d_blocks.UNetMidBlockSpatioTemporal`].
         num_attention_heads (`int`, `Tuple[int]`, defaults to `(5, 10, 10, 20)`):
             The number of attention heads.
         dropout (`float`, *optional*, defaults to 0.0): The dropout probability to use.
@@ -91,7 +90,7 @@ class UNetSpatioTemporalConditionModel(ModelMixin, ConfigMixin, UNet2DConditionL
         layers_per_block: Union[int, Tuple[int]] = 2,
         cross_attention_dim: Union[int, Tuple[int]] = 1024,
         transformer_layers_per_block: Union[int, Tuple[int], Tuple[Tuple]] = 1,
-        num_attention_heads: Union[int, Tuple[int]] = (5, 10, 20, 20),
+        num_attention_heads: Union[int, Tuple[int]] = (5, 10, 10, 20),
         num_frames: int = 25,
     ):
         super().__init__()
@@ -261,7 +260,7 @@ class UNetSpatioTemporalConditionModel(ModelMixin, ConfigMixin, UNet2DConditionL
             processors: Dict[str, AttentionProcessor],
         ):
             if hasattr(module, "get_processor"):
-                processors[f"{name}.processor"] = module.get_processor()
+                processors[f"{name}.processor"] = module.get_processor(return_deprecated_lora=True)
 
             for sub_name, child in module.named_children():
                 fn_recursive_add_processors(f"{name}.{sub_name}", child, processors)
@@ -324,7 +323,7 @@ class UNetSpatioTemporalConditionModel(ModelMixin, ConfigMixin, UNet2DConditionL
         if hasattr(module, "gradient_checkpointing"):
             module.gradient_checkpointing = value
 
-    # Copied from diffusers.models.unets.unet_3d_condition.UNet3DConditionModel.enable_forward_chunking
+    # Copied from diffusers.models.unet_3d_condition.UNet3DConditionModel.enable_forward_chunking
     def enable_forward_chunking(self, chunk_size: Optional[int] = None, dim: int = 0) -> None:
         """
         Sets the attention processor to use [feed forward
@@ -356,7 +355,7 @@ class UNetSpatioTemporalConditionModel(ModelMixin, ConfigMixin, UNet2DConditionL
 
     def forward(
         self,
-        sample: torch.Tensor,
+        sample: torch.FloatTensor,
         timestep: Union[torch.Tensor, float, int],
         encoder_hidden_states: torch.Tensor,
         added_time_ids: torch.Tensor,
@@ -366,21 +365,21 @@ class UNetSpatioTemporalConditionModel(ModelMixin, ConfigMixin, UNet2DConditionL
         The [`UNetSpatioTemporalConditionModel`] forward method.
 
         Args:
-            sample (`torch.Tensor`):
+            sample (`torch.FloatTensor`):
                 The noisy input tensor with the following shape `(batch, num_frames, channel, height, width)`.
-            timestep (`torch.Tensor` or `float` or `int`): The number of timesteps to denoise an input.
-            encoder_hidden_states (`torch.Tensor`):
+            timestep (`torch.FloatTensor` or `float` or `int`): The number of timesteps to denoise an input.
+            encoder_hidden_states (`torch.FloatTensor`):
                 The encoder hidden states with shape `(batch, sequence_length, cross_attention_dim)`.
-            added_time_ids: (`torch.Tensor`):
+            added_time_ids: (`torch.FloatTensor`):
                 The additional time ids with shape `(batch, num_additional_ids)`. These are encoded with sinusoidal
                 embeddings and added to the time embeddings.
             return_dict (`bool`, *optional*, defaults to `True`):
-                Whether or not to return a [`~models.unet_slatio_temporal.UNetSpatioTemporalConditionOutput`] instead
-                of a plain tuple.
+                Whether or not to return a [`~models.unet_slatio_temporal.UNetSpatioTemporalConditionOutput`] instead of a plain
+                tuple.
         Returns:
             [`~models.unet_slatio_temporal.UNetSpatioTemporalConditionOutput`] or `tuple`:
-                If `return_dict` is True, an [`~models.unet_slatio_temporal.UNetSpatioTemporalConditionOutput`] is
-                returned, otherwise a `tuple` is returned where the first element is the sample tensor.
+                If `return_dict` is True, an [`~models.unet_slatio_temporal.UNetSpatioTemporalConditionOutput`] is returned, otherwise
+                a `tuple` is returned where the first element is the sample tensor.
         """
         # 1. time
         timesteps = timestep
@@ -423,7 +422,6 @@ class UNetSpatioTemporalConditionModel(ModelMixin, ConfigMixin, UNet2DConditionL
         emb = emb.repeat_interleave(num_frames, dim=0)
         # encoder_hidden_states: [batch, 1, channels] -> [batch * frames, 1, channels]
         # encoder_hidden_states = encoder_hidden_states.repeat_interleave(num_frames, dim=0)
-
         # 2. pre-process
         sample = self.conv_in(sample)
 
@@ -459,7 +457,8 @@ class UNetSpatioTemporalConditionModel(ModelMixin, ConfigMixin, UNet2DConditionL
         for i, upsample_block in enumerate(self.up_blocks):
             res_samples = down_block_res_samples[-len(upsample_block.resnets) :]
             down_block_res_samples = down_block_res_samples[: -len(upsample_block.resnets)]
-
+            # print("upsample: ", sample.size(), encoder_hidden_states.size(), emb.size(), image_only_indicator.size(), res_samples[-1].size())
+            # torch.Size([50, 1280, 1, 1])
             if hasattr(upsample_block, "has_cross_attention") and upsample_block.has_cross_attention:
                 sample = upsample_block(
                     hidden_states=sample,

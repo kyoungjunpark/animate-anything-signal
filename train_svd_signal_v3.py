@@ -26,7 +26,9 @@ from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed, ProjectConfiguration
 
-from diffusers.models import AutoencoderKL, UNetSpatioTemporalConditionModel
+from diffusers.models import AutoencoderKL
+from models.unet_spatio_temporal_condition import UNetSpatioTemporalConditionModel
+
 
 from diffusers import DPMSolverMultistepScheduler, DDPMScheduler, EulerDiscreteScheduler
 from diffusers.image_processor import VaeImageProcessor
@@ -39,7 +41,7 @@ from diffusers.models.attention import BasicTransformerBlock
 # from diffusers import StableVideoDiffusionPipeline
 from diffusers.pipelines.stable_video_diffusion.pipeline_stable_video_diffusion import _resize_with_antialiasing
 
-from models.layerdiffuse_VAE import LatentSignalEncoder
+from models.layerdiffuse_VAE import LatentSignalEncoder, SignalEncoder, SignalEncoder2
 # from models.pipeline_stable_video_diffusion import StableVideoDiffusionPipeline
 from utils.dataset import get_train_dataset, extend_datasets
 from einops import rearrange, repeat
@@ -47,7 +49,7 @@ import imageio
 import wandb
 # from models.unet_3d_condition import UNet3DConditionModel
 
-from models.pipeline_signal_v2 import MaskStableVideoDiffusionPipeline
+from models.pipeline_signal_v3 import MaskStableVideoDiffusionPipeline
 
 already_printed_trainables = False
 
@@ -89,17 +91,21 @@ def load_primary_models(pretrained_model_path, eval=False):
                                                                 variant='fp16')
     else:
         pipeline = MaskStableVideoDiffusionPipeline.from_pretrained(pretrained_model_path)
+
+    pipeline.unet = UNetSpatioTemporalConditionModel.from_pretrained(pretrained_model_path + "/unet", low_cpu_mem_usage=False, ignore_mismatched_sizes=True)
     fps = 25
     CHIRP_LEN = 512
     encoder_hidden_dim = 1024
 
-    signal_encoder = LatentSignalEncoder(output_dim=encoder_hidden_dim)
+    # signal_encoder = LatentSignalEncoder(output_dim=encoder_hidden_dim)
+    signal_encoder = SignalEncoder(input_size=CHIRP_LEN, output_size=encoder_hidden_dim)
+
     # Just large dim for later interpolation
     input_latents_dim1 = 100
     input_latents_dim2 = 100
 
-    signal_encoder2 = LatentSignalEncoder(output_dim=input_latents_dim1 * input_latents_dim2)
-
+    # signal_encoder2 = LatentSignalEncoder(output_dim=input_latents_dim1 * input_latents_dim2)
+    signal_encoder2 = SignalEncoder2(signal_data_dim=CHIRP_LEN, target_h=8, target_w=8)
     return pipeline, None, pipeline.feature_extractor, pipeline.scheduler, pipeline.image_processor, \
            pipeline.image_encoder, pipeline.vae, pipeline.unet, signal_encoder, signal_encoder2
 
@@ -438,7 +444,8 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
 
     # Signal embedding
     assert "frame_step" in batch.keys()
-    frame_step = batch["frame_step"]
+    frame_step = batch["frame_step"][0].item()
+    # print("frame_step", frame_step)
     signal_values = torch.real(batch['signal_values']).float().half()  # [B, FPS * frame_step, 512]
     signal_values = torch.nan_to_num(signal_values, nan=0.0)
 
@@ -447,31 +454,35 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     signal_encoder = sig1.to(latents.device)
     signal_encoder2 = sig2.to(latents.device)
 
-    bsz = signal_values.size(0)
-    fps = signal_values.size(1)
-
     # [B, FPS, 512] -> [B * FPS, 512]
     # print(signal_values.size())
-    signal_embeddings = signal_encoder(signal_values)
-    # signal_embeddings = signal_embeddings.reshape(bsz, 1, -1)
+    # print("0", signal_values.size())  # torch.Size([2, 75, 512])
+    signal_values_reshaped = rearrange(signal_values, 'b (f c) h-> b f c h', c=frame_step)  # [B, FPS, 32]
+    # print("0.5", signal_values_reshaped.size())  # torch.Size([2, 25, 3, 512])
 
+    signal_embeddings = signal_encoder(signal_values_reshaped)
+    # print("1", signal_embeddings.size())
+    signal_embeddings = signal_embeddings.reshape(bsz*num_frames, 1, -1)
+    # print("2", signal_embeddings.size())
     # signal_embeddings = rearrange(signal_embeddings, '(b f) c-> b f c', b=bsz)  # [B, FPS, 32]
     # print("after rearrange: ", signal_embeddings.size())  # torch.Size([2, 25 -> 1, 1024]) torch.Size([50, 1, 1024])
     # print("signal_values", signal_values.size())
-    signal_embeddings2 = signal_encoder2(signal_values)
-    # print("signal_embeddings2", signal_embeddings2.size())
 
-    signal_embeddings2 = rearrange(signal_embeddings2, 'b f (c h w)-> (b f) c h w', c=1,
-                                   h=100, w=100)  # [B, FPS, 32]
+    # signal_embeddings2 = signal_encoder2(signal_values)
+    # print("signal_embeddings2", signal_embeddings2.size())
+    # signal_embeddings2 = rearrange(signal_embeddings2, 'b f (c h w)-> (b f) c h w', c=1, h=100, w=100)  # [B, FPS, 32]
     # print("after signal_embeddings2", signal_embeddings2.size())
     # signal_values torch.Size([2, 25, 512])
     # signal_embeddings2 torch.Size([2, 25, 10000])
     # after signal_embeddings2 torch.Size([2, 25, 1, 100, 100])
-    signal_embeddings2 = F.interpolate(signal_embeddings2, size=(input_latents.size(-2), input_latents.size(-1)), mode='bilinear')
-    signal_embeddings2 = rearrange(signal_embeddings2, '(b f) c h w-> b f c h w', b=bsz)  # [B, FPS, 32]
+    # signal_embeddings2 = F.interpolate(signal_embeddings2, size=(input_latents.size(-2), input_latents.size(-1)), mode='bilinear')
+    # signal_embeddings2 = rearrange(signal_embeddings2, '(b f) c h w-> b f c h w', b=bsz)  # [B, FPS, 32]
     # print("after interpolate", signal_embeddings2.size())
     # print("after rearrange2: ", signal_embeddings2.size()) # after rearrange2:  torch.Size([2, 25, 1, 64, 64])
+    print(signal_values_reshaped.size())
 
+    signal_embeddings2 = signal_encoder2(signal_values_reshaped)
+    print(signal_embeddings2.size())
     # signal_embeddings = signal_embeddings.reshape(signal_embeddings.size(0), 1, -1)
     # signal_resize_encoder = SignalResizeEncoder(input_dim=signal_embeddings.size(-1), output_dim=1024).half().to(device)
     # image_resize_encoder = ImageResizeEncoder(input_dim=image_embeddings.size(-1), output_dim=512).half().to(device)
@@ -492,16 +503,23 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
 
     # input_latents:  torch.Size([2, 25, 8, 64, 64])
     # signal_embeddings2: torch.Size([2, 25, 8 -> 1, 64, 64])
-    input_latents = torch.cat([signal_embeddings2, input_latents], dim=2)
+    try:
+        input_latents = torch.cat([signal_embeddings2, input_latents], dim=2)
+    except Exception as e:
+        print("signal_embeddings2 vs input_latents", signal_embeddings2.size(), input_latents.size())
+        raise e
     # print("final latents ", input_latents.size()) # final latents  torch.Size([2, 25, 9, 64, 64])
     motion_bucket_id = 127
-    added_time_ids = pipeline._get_add_time_ids(fps, motion_bucket_id,
+    added_time_ids = pipeline._get_add_time_ids(num_frames, motion_bucket_id,
                                                 noise_aug_strength, signal_embeddings.dtype, bsz, 1, False)
     added_time_ids = added_time_ids.to(device)
 
     loss = 0
 
     accelerator.wait_for_everyone()
+    # print(input_latents.size(), c_noise.size(), encoder_hidden_states.size(), added_time_ids.size())
+    # torch.Size([2, 25, 9, 1, 1]) torch.Size([2]) torch.Size([50, 1, 1024]) torch.Size([2, 3])
+    # torch.Size([50, 1280, 2, 2]) torch.Size([50, 1280, 1, 1])
     model_pred = unet(input_latents, c_noise, encoder_hidden_states=encoder_hidden_states,
                       added_time_ids=added_time_ids).sample
     predict_x0 = c_out * model_pred + c_skip * noisy_latents

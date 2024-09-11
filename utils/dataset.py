@@ -139,8 +139,8 @@ def get_frame_agg_signal_batch(signal_path, max_frames, sample_fps, vr, transfor
     frame_range = range(0, max_range, frame_step)
     if len(frame_range) < max_frames:
         frame_range = np.linspace(0, max_range - 1, max_frames).astype(int)
-    # start = random.randint(0, len(frame_range) - max_frames)
-    start = len(frame_range) - max_frames
+    start = random.randint(0, len(frame_range) - max_frames)
+    # start = len(frame_range) - max_frames
     frame_range_indices = list(frame_range)[start:start + max_frames]
     frames = vr.get_batch(frame_range_indices)
     video = rearrange(frames, "f h w c -> f c h w")
@@ -148,8 +148,66 @@ def get_frame_agg_signal_batch(signal_path, max_frames, sample_fps, vr, transfor
     # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     channels = torch.load(signal_path, map_location="cuda:0", weights_only=True)
+    # print("check", frame_step, start, max_frames, frame_range_indices, max_range, frame_range)
 
-    partial_channels = channels[start:start + max_frames]
+    if frame_range_indices[0] - frame_step >= 0:
+        partial_channels = channels[frame_range_indices[0]-frame_step:frame_range_indices[-1], :]
+        # print(partial_channels.size())  # 75, 512
+        # partial_channels = partial_channels.reshape()
+    else:
+        partial_channels = []
+
+        for i in range(0, len(frame_range_indices)):
+            # frame_range_indices[i] 2
+            # frame_range_indices[i-1 ] 0
+            if i == 0:
+                if frame_range_indices[i] >= frame_step:
+                    tmp_channel = channels[frame_range_indices[i]-frame_step:frame_range_indices[i], :]
+                    assert tmp_channel.size(0) == frame_step
+                    partial_channels.append(tmp_channel)
+                else:
+                    tmp_channel = channels[0:frame_range_indices[i], :]
+
+                    first_element = channels[0]
+                    first_element = first_element.unsqueeze(0)
+                    first_element_duplicated = first_element.repeat(frame_step - frame_range_indices[i], 1)
+                    tmp_channel = torch.cat((first_element_duplicated, tmp_channel), dim=0)
+                    assert tmp_channel.size(0) == frame_step, tmp_channel.size()
+                    partial_channels.append(tmp_channel)
+            else:
+                frame_diff = frame_range_indices[i] + 1 - frame_range_indices[i - 1]
+
+                # frame_diff 3
+                if frame_diff == frame_step + 1:
+                    tmp_channel = channels[frame_range_indices[i-1]:frame_range_indices[i], :]
+                    assert tmp_channel.size(0) == frame_step
+                    partial_channels.append(tmp_channel)
+                else:
+                    tmp_channel = channels[frame_range_indices[i-1]:frame_range_indices[i], :]
+
+                    first_element = channels[frame_range_indices[i-1]]
+                    first_element = first_element.unsqueeze(0)
+                    first_element_duplicated = first_element.repeat(frame_step - frame_diff + 1, 1)
+                    tmp_channel = torch.cat((first_element_duplicated, tmp_channel), dim=0)
+                    assert tmp_channel.size(0) == frame_step, tmp_channel.size()
+                    partial_channels.append(tmp_channel)
+
+#            else:
+#                 raise Exception(frame_range_indices)
+
+            """
+            elif frame_range_indices[i] - frame_range_indices[i-1] == frame_step - 1:
+                first_element = channels[frame_range_indices[i]].unsqueeze(0)
+                tmp_channel = channels[frame_range_indices[i]:frame_range_indices[i+1], :]
+
+                tmp_channel = torch.cat((first_element, tmp_channel), dim=0)
+                assert tmp_channel.size(0) == frame_step
+                partial_channels.append(tmp_channel)
+            """
+
+        partial_channels = torch.cat(partial_channels, dim=0)
+
+    # print(partial_channels.size()) # 75, 512
 
     # partial_channels = np.array(0)
     return video, partial_channels, frame_step

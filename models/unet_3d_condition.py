@@ -1,5 +1,5 @@
-# Copyright 2024 Alibaba DAMO-VILAB and The HuggingFace Team. All rights reserved.
-# Copyright 2024 The ModelScope Team.
+# Copyright 2023 Alibaba DAMO-VILAB and The HuggingFace Team. All rights reserved.
+# Copyright 2023 The ModelScope Team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -27,16 +27,14 @@ from diffusers.models.activations import get_activation
 from diffusers.models.attention_processor import (
     ADDED_KV_ATTENTION_PROCESSORS,
     CROSS_ATTENTION_PROCESSORS,
-    Attention,
     AttentionProcessor,
     AttnAddedKVProcessor,
     AttnProcessor,
-    FusedAttnProcessor2_0,
 )
 from diffusers.models.embeddings import TimestepEmbedding, Timesteps
 from diffusers.models.modeling_utils import ModelMixin
-from diffusers.models.transformers.transformer_temporal import TransformerTemporalModel
-from .unet_3d_blocks import (
+from diffusers.models.transformer_temporal import TransformerTemporalModel
+from diffusers.models.unet_3d_blocks import (
     CrossAttnDownBlock3D,
     CrossAttnUpBlock3D,
     DownBlock3D,
@@ -56,11 +54,11 @@ class UNet3DConditionOutput(BaseOutput):
     The output of [`UNet3DConditionModel`].
 
     Args:
-        sample (`torch.Tensor` of shape `(batch_size, num_channels, num_frames, height, width)`):
+        sample (`torch.FloatTensor` of shape `(batch_size, num_frames, num_channels, height, width)`):
             The hidden states output conditioned on `encoder_hidden_states` input. Output of last layer of model.
     """
 
-    sample: torch.Tensor
+    sample: torch.FloatTensor
 
 
 class UNet3DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin):
@@ -76,9 +74,9 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
             Height and width of input/output sample.
         in_channels (`int`, *optional*, defaults to 4): The number of channels in the input sample.
         out_channels (`int`, *optional*, defaults to 4): The number of channels in the output.
-        down_block_types (`Tuple[str]`, *optional*, defaults to `("CrossAttnDownBlock3D", "CrossAttnDownBlock3D", "CrossAttnDownBlock3D", "DownBlock3D")`):
+        down_block_types (`Tuple[str]`, *optional*, defaults to `("CrossAttnDownBlock2D", "CrossAttnDownBlock2D", "CrossAttnDownBlock2D", "DownBlock2D")`):
             The tuple of downsample blocks to use.
-        up_block_types (`Tuple[str]`, *optional*, defaults to `("UpBlock3D", "CrossAttnUpBlock3D", "CrossAttnUpBlock3D", "CrossAttnUpBlock3D")`):
+        up_block_types (`Tuple[str]`, *optional*, defaults to `("UpBlock2D", "CrossAttnUpBlock2D", "CrossAttnUpBlock2D", "CrossAttnUpBlock2D")`):
             The tuple of upsample blocks to use.
         block_out_channels (`Tuple[int]`, *optional*, defaults to `(320, 640, 1280, 1280)`):
             The tuple of output channels for each block.
@@ -89,11 +87,9 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         norm_num_groups (`int`, *optional*, defaults to 32): The number of groups to use for the normalization.
             If `None`, normalization and activation layers is skipped in post-processing.
         norm_eps (`float`, *optional*, defaults to 1e-5): The epsilon to use for the normalization.
-        cross_attention_dim (`int`, *optional*, defaults to 1024): The dimension of the cross attention features.
-        attention_head_dim (`int`, *optional*, defaults to 64): The dimension of the attention heads.
+        cross_attention_dim (`int`, *optional*, defaults to 1280): The dimension of the cross attention features.
+        attention_head_dim (`int`, *optional*, defaults to 8): The dimension of the attention heads.
         num_attention_heads (`int`, *optional*): The number of attention heads.
-        time_cond_proj_dim (`int`, *optional*, defaults to `None`):
-            The dimension of `cond_proj` layer in the timestep embedding.
     """
 
     _supports_gradient_checkpointing = False
@@ -126,7 +122,6 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         cross_attention_dim: int = 1024,
         attention_head_dim: Union[int, Tuple[int]] = 64,
         num_attention_heads: Optional[Union[int, Tuple[int]]] = None,
-        time_cond_proj_dim: Optional[int] = None,
     ):
         super().__init__()
 
@@ -178,7 +173,6 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
             timestep_input_dim,
             time_embed_dim,
             act_fn=act_fn,
-            cond_proj_dim=time_cond_proj_dim,
         )
 
         self.transformer_in = TransformerTemporalModel(
@@ -290,7 +284,7 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         )
 
     @property
-    # Copied from diffusers.models.unets.unet_2d_condition.UNet2DConditionModel.attn_processors
+    # Copied from diffusers.models.unet_2d_condition.UNet2DConditionModel.attn_processors
     def attn_processors(self) -> Dict[str, AttentionProcessor]:
         r"""
         Returns:
@@ -302,7 +296,7 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
 
         def fn_recursive_add_processors(name: str, module: torch.nn.Module, processors: Dict[str, AttentionProcessor]):
             if hasattr(module, "get_processor"):
-                processors[f"{name}.processor"] = module.get_processor()
+                processors[f"{name}.processor"] = module.get_processor(return_deprecated_lora=True)
 
             for sub_name, child in module.named_children():
                 fn_recursive_add_processors(f"{name}.{sub_name}", child, processors)
@@ -314,7 +308,7 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
 
         return processors
 
-    # Copied from diffusers.models.unets.unet_2d_condition.UNet2DConditionModel.set_attention_slice
+    # Copied from diffusers.models.unet_2d_condition.UNet2DConditionModel.set_attention_slice
     def set_attention_slice(self, slice_size: Union[str, int, List[int]]) -> None:
         r"""
         Enable sliced attention computation.
@@ -380,8 +374,10 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         for module in self.children():
             fn_recursive_set_attention_slice(module, reversed_slice_size)
 
-    # Copied from diffusers.models.unets.unet_2d_condition.UNet2DConditionModel.set_attn_processor
-    def set_attn_processor(self, processor: Union[AttentionProcessor, Dict[str, AttentionProcessor]]):
+    # Copied from diffusers.models.unet_2d_condition.UNet2DConditionModel.set_attn_processor
+    def set_attn_processor(
+        self, processor: Union[AttentionProcessor, Dict[str, AttentionProcessor]], _remove_lora=False
+    ):
         r"""
         Sets the attention processor to use to compute attention.
 
@@ -405,9 +401,9 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         def fn_recursive_attn_processor(name: str, module: torch.nn.Module, processor):
             if hasattr(module, "set_processor"):
                 if not isinstance(processor, dict):
-                    module.set_processor(processor)
+                    module.set_processor(processor, _remove_lora=_remove_lora)
                 else:
-                    module.set_processor(processor.pop(f"{name}.processor"))
+                    module.set_processor(processor.pop(f"{name}.processor"), _remove_lora=_remove_lora)
 
             for sub_name, child in module.named_children():
                 fn_recursive_attn_processor(f"{name}.{sub_name}", child, processor)
@@ -455,7 +451,7 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         for module in self.children():
             fn_recursive_feed_forward(module, None, 0)
 
-    # Copied from diffusers.models.unets.unet_2d_condition.UNet2DConditionModel.set_default_attn_processor
+    # Copied from diffusers.models.unet_2d_condition.UNet2DConditionModel.set_default_attn_processor
     def set_default_attn_processor(self):
         """
         Disables custom attention processors and sets the default attention implementation.
@@ -469,13 +465,13 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 f"Cannot call `set_default_attn_processor` when attention processors are of type {next(iter(self.attn_processors.values()))}"
             )
 
-        self.set_attn_processor(processor)
+        self.set_attn_processor(processor, _remove_lora=True)
 
     def _set_gradient_checkpointing(self, module, value: bool = False) -> None:
         if isinstance(module, (CrossAttnDownBlock3D, DownBlock3D, CrossAttnUpBlock3D, UpBlock3D)):
             module.gradient_checkpointing = value
 
-    # Copied from diffusers.models.unets.unet_2d_condition.UNet2DConditionModel.enable_freeu
+    # Copied from diffusers.models.unet_2d_condition.UNet2DConditionModel.enable_freeu
     def enable_freeu(self, s1, s2, b1, b2):
         r"""Enables the FreeU mechanism from https://arxiv.org/abs/2309.11497.
 
@@ -500,7 +496,7 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
             setattr(upsample_block, "b1", b1)
             setattr(upsample_block, "b2", b2)
 
-    # Copied from diffusers.models.unets.unet_2d_condition.UNet2DConditionModel.disable_freeu
+    # Copied from diffusers.models.unet_2d_condition.UNet2DConditionModel.disable_freeu
     def disable_freeu(self):
         """Disables the FreeU mechanism."""
         freeu_keys = {"s1", "s2", "b1", "b2"}
@@ -509,49 +505,9 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 if hasattr(upsample_block, k) or getattr(upsample_block, k, None) is not None:
                     setattr(upsample_block, k, None)
 
-    # Copied from diffusers.models.unets.unet_2d_condition.UNet2DConditionModel.fuse_qkv_projections
-    def fuse_qkv_projections(self):
-        """
-        Enables fused QKV projections. For self-attention modules, all projection matrices (i.e., query, key, value)
-        are fused. For cross-attention modules, key and value projection matrices are fused.
-
-        <Tip warning={true}>
-
-        This API is 🧪 experimental.
-
-        </Tip>
-        """
-        self.original_attn_processors = None
-
-        for _, attn_processor in self.attn_processors.items():
-            if "Added" in str(attn_processor.__class__.__name__):
-                raise ValueError("`fuse_qkv_projections()` is not supported for models having added KV projections.")
-
-        self.original_attn_processors = self.attn_processors
-
-        for module in self.modules():
-            if isinstance(module, Attention):
-                module.fuse_projections(fuse=True)
-
-        self.set_attn_processor(FusedAttnProcessor2_0())
-
-    # Copied from diffusers.models.unets.unet_2d_condition.UNet2DConditionModel.unfuse_qkv_projections
-    def unfuse_qkv_projections(self):
-        """Disables the fused QKV projection if enabled.
-
-        <Tip warning={true}>
-
-        This API is 🧪 experimental.
-
-        </Tip>
-
-        """
-        if self.original_attn_processors is not None:
-            self.set_attn_processor(self.original_attn_processors)
-
     def forward(
         self,
-        sample: torch.Tensor,
+        sample: torch.FloatTensor,
         timestep: Union[torch.Tensor, float, int],
         encoder_hidden_states: torch.Tensor,
         class_labels: Optional[torch.Tensor] = None,
@@ -561,15 +517,15 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         down_block_additional_residuals: Optional[Tuple[torch.Tensor]] = None,
         mid_block_additional_residual: Optional[torch.Tensor] = None,
         return_dict: bool = True,
-    ) -> Union[UNet3DConditionOutput, Tuple[torch.Tensor]]:
+    ) -> Union[UNet3DConditionOutput, Tuple[torch.FloatTensor]]:
         r"""
         The [`UNet3DConditionModel`] forward method.
 
         Args:
-            sample (`torch.Tensor`):
-                The noisy input tensor with the following shape `(batch, num_channels, num_frames, height, width`.
-            timestep (`torch.Tensor` or `float` or `int`): The number of timesteps to denoise an input.
-            encoder_hidden_states (`torch.Tensor`):
+            sample (`torch.FloatTensor`):
+                The noisy input tensor with the following shape `(batch, num_frames, channel, height, width`.
+            timestep (`torch.FloatTensor` or `float` or `int`): The number of timesteps to denoise an input.
+            encoder_hidden_states (`torch.FloatTensor`):
                 The encoder hidden states with shape `(batch, sequence_length, feature_dim)`.
             class_labels (`torch.Tensor`, *optional*, defaults to `None`):
                 Optional class labels for conditioning. Their embeddings will be summed with the timestep embeddings.
@@ -589,15 +545,15 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
             mid_block_additional_residual: (`torch.Tensor`, *optional*):
                 A tensor that if specified is added to the residual of the middle unet block.
             return_dict (`bool`, *optional*, defaults to `True`):
-                Whether or not to return a [`~models.unets.unet_3d_condition.UNet3DConditionOutput`] instead of a plain
+                Whether or not to return a [`~models.unet_3d_condition.UNet3DConditionOutput`] instead of a plain
                 tuple.
             cross_attention_kwargs (`dict`, *optional*):
                 A kwargs dictionary that if specified is passed along to the [`AttnProcessor`].
 
         Returns:
-            [`~models.unets.unet_3d_condition.UNet3DConditionOutput`] or `tuple`:
-                If `return_dict` is True, an [`~models.unets.unet_3d_condition.UNet3DConditionOutput`] is returned,
-                otherwise a `tuple` is returned where the first element is the sample tensor.
+            [`~models.unet_3d_condition.UNet3DConditionOutput`] or `tuple`:
+                If `return_dict` is True, an [`~models.unet_3d_condition.UNet3DConditionOutput`] is returned, otherwise
+                a `tuple` is returned where the first element is the sample tensor.
         """
         # By default samples have to be AT least a multiple of the overall upsampling factor.
         # The overall upsampling factor is equal to 2 ** (# num of upsampling layears).
