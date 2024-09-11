@@ -500,6 +500,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         signal_embeddings = signal_encoder(signal_values_reshaped)
         # print("1", signal_embeddings.size())
         signal_embeddings = signal_embeddings.reshape(batch_size * num_frames, 1, -1)
+
         # print("signal_values_resized", signal_values_resized.size())
         signal_embeddings2 = signal_encoder2(signal_values_reshaped)
 

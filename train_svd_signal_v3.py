@@ -85,7 +85,7 @@ def create_output_folders(output_dir, config):
     return out_dir
 
 
-def load_primary_models(pretrained_model_path, eval=False):
+def load_primary_models(pretrained_model_path, width, height, eval=False):
     if eval:
         pipeline = MaskStableVideoDiffusionPipeline.from_pretrained(pretrained_model_path, torch_dtype=torch.float16,
                                                                 variant='fp16')
@@ -105,7 +105,7 @@ def load_primary_models(pretrained_model_path, eval=False):
     input_latents_dim2 = 100
 
     # signal_encoder2 = LatentSignalEncoder(output_dim=input_latents_dim1 * input_latents_dim2)
-    signal_encoder2 = SignalEncoder2(signal_data_dim=CHIRP_LEN, target_h=8, target_w=8)
+    signal_encoder2 = SignalEncoder2(signal_data_dim=CHIRP_LEN, target_h=width//8, target_w=height//8)
     return pipeline, None, pipeline.feature_extractor, pipeline.scheduler, pipeline.image_processor, \
            pipeline.image_encoder, pipeline.vae, pipeline.unet, signal_encoder, signal_encoder2
 
@@ -479,10 +479,8 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     # signal_embeddings2 = rearrange(signal_embeddings2, '(b f) c h w-> b f c h w', b=bsz)  # [B, FPS, 32]
     # print("after interpolate", signal_embeddings2.size())
     # print("after rearrange2: ", signal_embeddings2.size()) # after rearrange2:  torch.Size([2, 25, 1, 64, 64])
-    print(signal_values_reshaped.size())
 
     signal_embeddings2 = signal_encoder2(signal_values_reshaped)
-    print(signal_embeddings2.size())
     # signal_embeddings = signal_embeddings.reshape(signal_embeddings.size(0), 1, -1)
     # signal_resize_encoder = SignalResizeEncoder(input_dim=signal_embeddings.size(-1), output_dim=1024).half().to(device)
     # image_resize_encoder = ImageResizeEncoder(input_dim=image_embeddings.size(-1), output_dim=512).half().to(device)
@@ -598,7 +596,7 @@ def main(
 
     # Load scheduler, tokenizer and models. The text encoder is actually image encoder for SVD
     pipeline, tokenizer, feature_extractor, train_scheduler, vae_processor, text_encoder, vae, unet, sig1, sig2 = load_primary_models(
-        pretrained_model_path)
+        pretrained_model_path, train_data.width, train_data.height)
     # Freeze any necessary models
     freeze_models([vae, unet])
 
