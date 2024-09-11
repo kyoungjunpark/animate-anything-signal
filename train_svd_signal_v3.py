@@ -709,7 +709,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("svd_with_signal_v3_new_data_reduced_layers_agg_sig")
+        accelerator.init_trackers("svd_with_signal_v3_new_data_reduced_layers_agg_sig_rand_start")
         wandb.require("core")
 
     # Train!
