@@ -85,7 +85,7 @@ def create_output_folders(output_dir, config):
     return out_dir
 
 
-def load_primary_models(pretrained_model_path, width, height, eval=False):
+def load_primary_models(pretrained_model_path, fps, width, height, eval=False):
     if eval:
         pipeline = MaskStableVideoDiffusionPipeline.from_pretrained(pretrained_model_path, torch_dtype=torch.float16,
                                                                 variant='fp16')
@@ -93,7 +93,6 @@ def load_primary_models(pretrained_model_path, width, height, eval=False):
         pipeline = MaskStableVideoDiffusionPipeline.from_pretrained(pretrained_model_path)
 
     pipeline.unet = UNetSpatioTemporalConditionModel.from_pretrained(pretrained_model_path + "/unet", low_cpu_mem_usage=False, ignore_mismatched_sizes=True)
-    fps = 25
     CHIRP_LEN = 512
     encoder_hidden_dim = 1024
 
@@ -596,7 +595,7 @@ def main(
 
     # Load scheduler, tokenizer and models. The text encoder is actually image encoder for SVD
     pipeline, tokenizer, feature_extractor, train_scheduler, vae_processor, text_encoder, vae, unet, sig1, sig2 = load_primary_models(
-        pretrained_model_path, train_data.width, train_data.height)
+        pretrained_model_path, train_data.fps, train_data.width, train_data.height)
     # Freeze any necessary models
     freeze_models([vae, unet])
 
