@@ -16,7 +16,7 @@ inference code:
         please download pretrained transparent unet: https://cloudbook-public-daily.oss-cn-hangzhou.aliyuncs.com/animation/transparent_unet.tar
             , extract this tar, and then place it at transparent_unet_pretrained_model_path
 
-        run "python train_transparent_i2v_stage2.py --config example/layerdiffuse_stage2_384.yaml --eval" 
+        run "python train_transparent_i2v_stage2.py --config configs/layerdiffuse_stage2_384.yaml --eval"
         results will be saved at "output/stage_2_eval" by default
 
     Note: This is code in the early stages and may be subject to significant changes. The training code and dataset are not yet open-sourced.
@@ -660,7 +660,7 @@ def main_eval(
         validation_data, output_dir, True, num_examples=num_examples, eval_file=eval_file, iters=iters, in_channels=in_channels)
 
 if __name__ == "__main__":
-    # python train_transparent_i2v_stage2.py --config example/layerdiffuse_stage2_384.yaml --eval
+    # python train_transparent_i2v_stage2.py --config configs/layerdiffuse_stage2_384.yaml --eval
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default="./example/layerdiffuse_stage2_384.yaml")
     parser.add_argument("--eval", action="store_true", default=True)

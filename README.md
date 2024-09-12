@@ -163,23 +163,23 @@ All configuration details are placed in `example/train_mask_motion.yaml`. Each p
 ### Finetuning anymate-anything
 You can finetune anymate-anything with text, motion mask, motion strength guidance on your own dataset. The following config requires around 30G GPU RAM. You can reduce the train_batch_size, train_data.width, train_data.height, and n_sample_frames in the config to reduce GPU RAM:
 ```
-python train.py --config example/train_mask_motion.yaml pretrained_model_path=<download_model>
+python train.py --config configs/train_mask_motion.yaml pretrained_model_path=<download_model>
 ```
 
 We also support lora finetuning:
 ```
-python train_lora.py --config example/train_mask_motion_lora.yaml pretrained_model_path=<download_model>
+python train_lora.py --config configs/train_mask_motion_lora.yaml pretrained_model_path=<download_model>
 ```
 
 ### Finetune Stable Video Diffusion:
 Stable Video Diffusion (SVD) img2vid model can generate high resolution videos. However, it does not have the text or motion mask control. You can finetune SVD with motioin mask guidance with the following commands and [pretrained SVD model](https://cloudbook-public-production.oss-cn-shanghai.aliyuncs.com/animation/animate_anything_svd_v1.0.tar). This config requires around 80G GPU RAM.
 ```
-python train_svd.py --config example/train_svd_mask.yaml pretrained_model_path=<download_model>
+python train_svd.py --config configs/train_svd_mask.yaml pretrained_model_path=<download_model>
 ```
 
 If you only want to finetune SVD on your own dataset without motion mask control, please use the following config:
 ```
-python train_svd.py --config example/train_svd.yaml pretrained_model_path=<svd_model>
+python train_svd.py --config configs/train_svd.yaml pretrained_model_path=<svd_model>
 ```
 
 ### Multiple GPUs training
@@ -187,7 +187,7 @@ I strongly recommend use multiple GPUs training with Accelerator, which will lar
 
 And then replace 'python train_xx.py ...' commands above with 'accelerate launch train_xx.py ...', for example:
 ```
-accelerate launch --config_file example/deepspeed.yaml train_svd.py --config example/train_svd_mask.yaml pretrained_model_path=<download_model>
+accelerate launch --config_file configs/deepspeed.yaml train_svd.py --config configs/train_svd_mask.yaml pretrained_model_path=<download_model>
 ```
 
 ### SVD video2video
@@ -195,7 +195,7 @@ We now release the finetuned vid2vid SVD model, you can try it via the gradio UI
 
 Please download the [vid2vid_SVD model](https://cloudbook-public-production.oss-cn-shanghai.aliyuncs.com/animation/animate_anything_svd_v1.01.tar) and extract it to output/svd/{download_model} and then run the command:
 ```
-python app_svd.py --config example/train_svd_v2v.yaml pretrained_model_path=output/svd/{download_model}
+python app_svd.py --config configs/train_svd_v2v.yaml pretrained_model_path=output/svd/{download_model}
 ```
 
 We provide several examples in the svd_video2video_examples directory.

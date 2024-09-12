@@ -6,6 +6,7 @@ import random
 import numpy as np
 import argparse
 import decord
+import cv2
 
 from einops import rearrange
 from torchvision import transforms
@@ -83,6 +84,38 @@ class PreProcessVideos:
             "frame_index": frame_index,
             "prompt": prompt
         }
+
+    def check_frames_same(self, video_path):
+        # Load video
+        cap = cv2.VideoCapture(video_path)
+
+        # Read the first frame
+        ret, first_frame = cap.read()
+
+        if not ret:
+            print("Error reading the first frame")
+            return False
+
+        # Convert first frame to grayscale for easier comparison
+        first_frame_gray = cv2.cvtColor(first_frame, cv2.COLOR_BGR2GRAY)
+
+        while True:
+            ret, frame = cap.read()
+
+            # If no more frames, exit loop
+            if not ret:
+                break
+
+            # Convert current frame to grayscale
+            frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+            # Check if current frame is the same as the first frame
+            if not np.array_equal(first_frame_gray, frame_gray):
+                print("Frames are not the same.")
+                return False
+
+        print("All frames are the same.")
+        return True
 
     # Load BLIP2 for processing
     def load_blip(self):
@@ -173,8 +206,11 @@ class PreProcessVideos:
             except:
                 print(f"Error loading {video_path}. Video may be unsupported or corrupt.")
                 continue
+            if self.check_frames_same(video_path):
+                print(f"Frames are all same for {video_path}.")
+                continue
 
-            signal_path = video_path.replace("locomotion_video_000", "locomotion_signal_new_2_4").replace("output.mp4",
+            signal_path = video_path.replace("locomotion_video_random_000", "locomotion_signal_new_2_4").replace("output.mp4",
                                                                                                       "channels.pt")
 
             if not os.path.exists(signal_path):

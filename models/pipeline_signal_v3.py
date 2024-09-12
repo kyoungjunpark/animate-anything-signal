@@ -22,11 +22,55 @@ from models.unet_spatio_temporal_condition import UNetSpatioTemporalConditionMod
 from diffusers import DDIMScheduler, EulerDiscreteScheduler, PNDMScheduler
 
 
+def _resize_with_antialiasing(input, size, interpolation="bicubic", align_corners=True):
+    h, w = input.shape[-2:]
+    factors = (h / size[0], w / size[1])
+
+    # First, we have to determine sigma
+    # Taken from skimage: https://github.com/scikit-image/scikit-image/blob/v0.19.2/skimage/transform/_warps.py#L171
+    sigmas = (
+        max((factors[0] - 1.0) / 2.0, 0.001),
+        max((factors[1] - 1.0) / 2.0, 0.001),
+    )
+
+    # Now kernel size. Good results are for 3 sigma, but that is kind of slow. Pillow uses 1 sigma
+    # https://github.com/python-pillow/Pillow/blob/master/src/libImaging/Resample.c#L206
+    # But they do it in the 2 passes, which gives better results. Let's try 2 sigmas for now
+    ks = int(max(2.0 * 2 * sigmas[0], 3)), int(max(2.0 * 2 * sigmas[1], 3))
+
+    # Make sure it is odd
+    if (ks[0] % 2) == 0:
+        ks = ks[0] + 1, ks[1]
+
+    if (ks[1] % 2) == 0:
+        ks = ks[0], ks[1] + 1
+
+    input = _gaussian_blur2d(input, ks, sigmas)
+
+    output = torch.nn.functional.interpolate(input, size=size, mode=interpolation, align_corners=align_corners)
+    return output
+
+
+def _gaussian_blur2d(input, kernel_size, sigma):
+    if isinstance(sigma, tuple):
+        sigma = torch.tensor([sigma], dtype=input.dtype)
+    else:
+        sigma = sigma.to(dtype=input.dtype)
+
+    ky, kx = int(kernel_size[0]), int(kernel_size[1])
+    bs = sigma.shape[0]
+    kernel_x = _gaussian(kx, sigma[:, 1].view(bs, 1))
+    kernel_y = _gaussian(ky, sigma[:, 0].view(bs, 1))
+    out_x = _filter2d(input, kernel_x[..., None, :])
+    out = _filter2d(out_x, kernel_y[..., None])
+
+    return out
+
+
 def load_channel(channels, frame_step, frame_range_indices):
     if frame_range_indices[0] - frame_step >= 0:
         partial_channels = channels[frame_range_indices[0] - frame_step:frame_range_indices[-1], :]
-        # print(partial_channels.size())  # 75, 512
-        # partial_channels = partial_channels.reshape()
+
     else:
         partial_channels = []
 
@@ -43,6 +87,7 @@ def load_channel(channels, frame_step, frame_range_indices):
 
                     first_element = channels[0]
                     first_element = first_element.unsqueeze(0)
+                    print("here", frame_step, frame_range_indices[i], first_element.size())
                     first_element_duplicated = first_element.repeat(frame_step - frame_range_indices[i], 1)
                     tmp_channel = torch.cat((first_element_duplicated, tmp_channel), dim=0)
                     assert tmp_channel.size(0) == frame_step, tmp_channel.size()
@@ -65,9 +110,8 @@ def load_channel(channels, frame_step, frame_range_indices):
                     assert tmp_channel.size(0) == frame_step, tmp_channel.size()
                     partial_channels.append(tmp_channel)
 
-
-        partial_channels = torch.cat(partial_channels, dim=0)
-        return partial_channels
+            partial_channels = torch.cat(partial_channels, dim=0)
+    return partial_channels
 
 
 class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
@@ -75,12 +119,12 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
     _callback_tensor_inputs = ["latents"]
 
     def __init__(
-        self,
-        vae: AutoencoderKLTemporalDecoder,
-        image_encoder: CLIPVisionModelWithProjection,
-        unet: UNetSpatioTemporalConditionModel,
-        scheduler: EulerDiscreteScheduler,
-        feature_extractor: CLIPImageProcessor,
+            self,
+            vae: AutoencoderKLTemporalDecoder,
+            image_encoder: CLIPVisionModelWithProjection,
+            unet: UNetSpatioTemporalConditionModel,
+            scheduler: EulerDiscreteScheduler,
+            feature_extractor: CLIPImageProcessor,
     ):
         super().__init__(vae, image_encoder, unet, scheduler, feature_extractor)
 
@@ -94,80 +138,15 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
 
-    def _encode_image(self, image, device, num_videos_per_prompt, do_classifier_free_guidance):
-        dtype = next(self.image_encoder.parameters()).dtype
-
-        if not isinstance(image, torch.Tensor):
-            image = self.image_processor.pil_to_numpy(image)
-            image = self.image_processor.numpy_to_pt(image)
-
-            # We normalize the image before resizing to match with the original implementation.
-            # Then we unnormalize it after resizing.
-            image = image * 2.0 - 1.0
-            image = _resize_with_antialiasing(image, (224, 224))
-            image = (image + 1.0) / 2.0
-
-            # Normalize the image with for CLIP input
-            image = self.feature_extractor(
-                images=image,
-                do_normalize=True,
-                do_center_crop=False,
-                do_resize=False,
-                do_rescale=False,
-                return_tensors="pt",
-            ).pixel_values
-
-        image = image.to(device=device, dtype=dtype)
-        image_embeddings = self.image_encoder(image).image_embeds
-        image_embeddings = image_embeddings.unsqueeze(1)
-
-        # duplicate image embeddings for each generation per prompt, using mps friendly method
-        bs_embed, seq_len, _ = image_embeddings.shape
-        image_embeddings = image_embeddings.repeat(1, num_videos_per_prompt, 1)
-        image_embeddings = image_embeddings.view(bs_embed * num_videos_per_prompt, seq_len, -1)
-
-        if do_classifier_free_guidance:
-            negative_image_embeddings = torch.zeros_like(image_embeddings)
-
-            # For classifier free guidance, we need to do two forward passes.
-            # Here we concatenate the unconditional and text embeddings into a single batch
-            # to avoid doing two forward passes
-            image_embeddings = torch.cat([negative_image_embeddings, image_embeddings])
-
-        return image_embeddings
-
-    def _encode_vae_image(
-        self,
-        image: torch.Tensor,
-        device,
-        num_videos_per_prompt,
-        do_classifier_free_guidance,
-    ):
-        image = image.to(device=device)
-        image_latents = self.vae.encode(image).latent_dist.mode()
-
-        if do_classifier_free_guidance:
-            negative_image_latents = torch.zeros_like(image_latents)
-
-            # For classifier free guidance, we need to do two forward passes.
-            # Here we concatenate the unconditional and text embeddings into a single batch
-            # to avoid doing two forward passes
-            image_latents = torch.cat([negative_image_latents, image_latents])
-
-        # duplicate image_latents for each generation per prompt, using mps friendly method
-        image_latents = image_latents.repeat(num_videos_per_prompt, 1, 1, 1)
-
-        return image_latents
-
     def _get_add_time_ids(
-        self,
-        fps,
-        motion_bucket_id,
-        noise_aug_strength,
-        dtype,
-        batch_size,
-        num_videos_per_prompt,
-        do_classifier_free_guidance,
+            self,
+            fps,
+            motion_bucket_id,
+            noise_aug_strength,
+            dtype,
+            batch_size,
+            num_videos_per_prompt,
+            do_classifier_free_guidance,
     ):
         add_time_ids = [fps, motion_bucket_id, noise_aug_strength]
 
@@ -187,39 +166,11 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
 
         return add_time_ids
 
-    def decode_latents(self, latents, num_frames, decode_chunk_size=14):
-        # [batch, frames, channels, height, width] -> [batch*frames, channels, height, width]
-        latents = latents.flatten(0, 1)
-
-        latents = 1 / self.vae.config.scaling_factor * latents
-
-        accepts_num_frames = "num_frames" in set(inspect.signature(self.vae.forward).parameters.keys())
-
-        # decode decode_chunk_size frames at a time to avoid OOM
-        frames = []
-        for i in range(0, latents.shape[0], decode_chunk_size):
-            num_frames_in = latents[i : i + decode_chunk_size].shape[0]
-            decode_kwargs = {}
-            if accepts_num_frames:
-                # we only pass num_frames_in if it's expected
-                decode_kwargs["num_frames"] = num_frames_in
-
-            frame = self.vae.decode(latents[i : i + decode_chunk_size], **decode_kwargs).sample
-            frames.append(frame)
-        frames = torch.cat(frames, dim=0)
-
-        # [batch*frames, channels, height, width] -> [batch, channels, frames, height, width]
-        frames = frames.reshape(-1, num_frames, *frames.shape[1:]).permute(0, 2, 1, 3, 4)
-
-        # we always cast to float32 as this does not cause significant overhead and is compatible with bfloat16
-        frames = frames.float()
-        return frames
-
     def check_inputs(self, image, height, width):
         if (
-            not isinstance(image, torch.Tensor)
-            and not isinstance(image, PIL.Image.Image)
-            and not isinstance(image, list)
+                not isinstance(image, torch.Tensor)
+                and not isinstance(image, PIL.Image.Image)
+                and not isinstance(image, list)
         ):
             raise ValueError(
                 "`image` has to be of type `torch.FloatTensor` or `PIL.Image.Image` or `List[PIL.Image.Image]` but is"
@@ -230,16 +181,16 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
             raise ValueError(f"`height` and `width` have to be divisible by 8 but are {height} and {width}.")
 
     def prepare_latents(
-        self,
-        batch_size,
-        num_frames,
-        num_channels_latents,
-        height,
-        width,
-        dtype,
-        device,
-        generator,
-        latents=None,
+            self,
+            batch_size,
+            num_frames,
+            num_channels_latents,
+            height,
+            width,
+            dtype,
+            device,
+            generator,
+            latents=None,
     ):
         shape = (
             batch_size,
@@ -302,7 +253,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
             mask=None,
             signal=None,
             sig1=None,
-            sig2=None,
+            sig2=None
     ):
         r"""
         The call function to the pipeline for generation.
@@ -475,16 +426,21 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         signal_values = torch.nan_to_num(signal_values, nan=0.0)
         target_fps = 25
 
+        max_frame = signal_values.size(0)
+
         native_fps = 20
         sample_fps = fps + 1
         frame_step = max(1, round(native_fps / sample_fps))
-        frame_range = range(0, num_frames, frame_step)
+        frame_range = range(0, max_frame, frame_step)
 
-        frame_range_indices = list(frame_range)[0:0 + num_frames]
+        frame_range_indices = list(frame_range)[1:1 + num_frames]
 
         assert frame_step == 3
-        signal_values = signal_values.unsqueeze(0)
+
+        # print(signal_values.unsqueeze(0).size())
         signal_values = load_channel(signal_values, frame_step, frame_range_indices)
+        signal_values = signal_values.unsqueeze(0)
+
 
         # print("unsqueeze", signal_values.size())
 
@@ -519,8 +475,8 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         # print("mask ", mask.size()) # mask, torch.Size([1, 25, 1, 56, 72])
 
         mask = torch.cat([mask] * 2) if do_classifier_free_guidance else mask
-        encoder_hidden_states = torch.cat([encoder_hidden_states] * 2) if do_classifier_free_guidance else encoder_hidden_states
-
+        encoder_hidden_states = torch.cat(
+            [encoder_hidden_states] * 2) if do_classifier_free_guidance else encoder_hidden_states
 
         # 8. Denoising loop
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
@@ -758,7 +714,8 @@ class LatentToVideoPipeline(TextToVideoSDPipeline):
         # encoder_hidden_states = torch.cat((image_embeddings, signal_embeddings), dim=2)
         encoder_hidden_states = signal_embeddings
         uncond_hidden_states = torch.zeros_like(encoder_hidden_states)
-        encoder_hidden_states = torch.cat([encoder_hidden_states] * 2) if do_classifier_free_guidance else encoder_hidden_states
+        encoder_hidden_states = torch.cat(
+            [encoder_hidden_states] * 2) if do_classifier_free_guidance else encoder_hidden_states
 
         # mask torch.Size([2, 25, 1, 64, 64]) torch.Size([2, 25, 1, 64, 64])
         # mask = torch.cat((signal_embeddings2, signal_embeddings3), dim=2)
@@ -836,7 +793,7 @@ class LatentToVideoPipeline(TextToVideoSDPipeline):
             self.final_offload_hook.offload()
 
         if not return_dict:
-            return (video, latents)
+            return video, latents
 
         return TextToVideoSDPipelineOutput(frames=video)
 

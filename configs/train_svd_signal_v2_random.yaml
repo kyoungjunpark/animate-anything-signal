@@ -1,27 +1,14 @@
-InputFPS: &InputFPS 6
-FrameLength: &FrameLength 25
-BatchSize: &BatchSize 1
-BaseLearningRate: &BaseLearningRate 5.0e-6
-DataDir: &DataDir /home/yifanyang/container_us/zyhe/vae_features  # specify your data dir
-MetadataDir: &MetadataDir /home/yifanyang/video_dataset  # specify your data dir
-ResolutionH: &ResolutionH 576
-ResolutionW: &ResolutionW 1024
-
-
 # Pretrained diffusers model path.
 #pretrained_model_path: "output/latent/train_mask_motion" #https://huggingface.co/damo-vilab/text-to-video-ms-1.7b/tree/main
-pretrained_model_path: "./output/finetune-svd-xt-1-1"
-pretrained_model_teacher_path: "./output/stable-video-diffusion-img2vid-xt-1-1"
+# pretrained_model_path: "pretrained/animate_anything_svd_v1.0"
+pretrained_model_path: "pretrained/animate_anything_svd_v1.0"
 
-
-motion_mask: False
+motion_mask: True
 motion_strength: False
 
-# The folder where your training outputs will be placed.
-output_dir: "./output/svd-xt"
-
-# logger type
 logger_type: "wandb"
+# The folder where your training outputs will be placed.
+output_dir: "./output/svd_signal_v2"
 
 # You can train multiple datasets at once. They will be joined together for training.
 # Simply remove the line you don't need, or keep them all for mixed training.
@@ -31,11 +18,11 @@ logger_type: "wandb"
 # 'video_blip': The JSON file created with automatic BLIP2 captions using https://github.com/ExponentialML/Video-BLIP2-Preprocessor
 # 'video_json': a video foler and a json caption file
 # 'single_video': A single video file.mp4 and text prompt
-dataset_types:
+dataset_types: 
   #- 'single_video'
   #- 'folder'
   #- 'image'
-  - 'video_blip'
+  - 'video_blip_v2'
   #- 'video_json'
 
 # Adds offset noise to training. See https://www.crosslabs.org/blog/diffusion-with-offset-noise
@@ -47,17 +34,17 @@ use_offset_noise: False
 # If this is enabled, offset noise will be disabled.
 rescale_schedule: False
 
-# When True, this extends all items in all enabled datasets to the highest length.
-# For example, if you have 200 videos and 10 images, 10 images will be duplicated to the length of 200.
+# When True, this extends all items in all enabled datasets to the highest length. 
+# For example, if you have 200 videos and 10 images, 10 images will be duplicated to the length of 200. 
 extend_dataset: False
 
-# Caches the latents (Frames-Image -> VAE -> Latent) to a HDD or SDD.
+# Caches the latents (Frames-Image -> VAE -> Latent) to a HDD or SDD. 
 # The latents will be saved under your training folder, and loaded automatically for training.
 # This both saves memory and speeds up training and takes very little disk space.
 cache_latents: False
 
 # If you have cached latents set to `True` and have a directory of cached latents,
-# you can skip the caching process and load previously saved ones.
+# you can skip the caching process and load previously saved ones. 
 cached_latent_dir: null #/path/to/cached_latents
 
 # Train the text encoder for the model. LoRA Training overrides this setting.
@@ -71,21 +58,18 @@ train_text_encoder: False
 # This is an implementation based off of the original LoRA repository by Microsoft, and the default LoRA method here.
 # It works a different by using embeddings instead of the intermediate activations (Linear || Conv).
 # This means that there isn't an extra function when doing low ranking adaption.
-# It solely saves the weight differential between the initialized weights and updates.
+# It solely saves the weight differential between the initialized weights and updates. 
 
 # "cloneofsimo" or "stable_lora"
+# lora_version: "cloneofsimo"
 lora_version: "stable_lora"
 
 # Use LoRA for the UNET model.
-use_unet_lora: True
+use_unet_lora: False
+# use_unet_lora: True
 
 # Use LoRA for the Text Encoder. If this is set, the text encoder for the model will not be trained.
 use_text_lora: False
-
-# Use trained LoRA to continue training with. Only LoRA files trained with this repository will work.
-# LoRA files are saved in the same directory as outputs under 'lora'.
-# To load them, they must have 'unet' and 'text_encoder' in their names.
-lora_path: ''
 
 # LoRA Dropout. This parameter adds the probability of randomly zeros out elements. Helps prevent overfitting.
 # See: https://pytorch.org/docs/stable/generated/torch.nn.Dropout.html
@@ -110,11 +94,8 @@ save_pretrained_model: True
 
 # The modules to use for LoRA. Different from 'trainable_modules'.
 unet_lora_modules:
-  # - "UNet3DConditionModel"
-  - "UNetSpatioTemporalConditionDownsampleModel"
-  # - "UNetSpatioTemporalConditionModel"
-  # - "TemporalBasicTransformerBlock"
-  # - "TemporalResnetBlock"
+  - "UNet3DConditionModel"
+  # - "UNetSpatioTemporalConditionDownsampleModel"
   #- "ResnetBlock2D"
   #- "TransformerTemporalModel"
   #- "Transformer2DModel"
@@ -123,62 +104,86 @@ unet_lora_modules:
   #- "GEGLU"
   #- "TemporalConvLayer"
 
-# The layer names to be excluded from LoRA.
-unet_exclude_names:
-  - "downsample_temporal"
-  - "upsample_temporal"
-
 # The modules to use for LoRA. Different from `trainable_text_modules`.
 text_encoder_lora_modules:
   - "CLIPEncoderLayer"
   #- "CLIPAttention"
 
-# The rank for LoRA training. With ModelScope, the maximum should be 1024.
+# The rank for LoRA training. With ModelScope, the maximum should be 1024. 
 # VRAM increases with higher rank, lower when decreased.
-lora_rank: 8
+lora_rank: 16
+# lora_rank: 8
 
 # Training data parameters
 train_data:
-  dataset_name: "WebVid"
-  data_dir: *DataDir
-  metadata_dir: *MetadataDir
-  split: "train_getty"
-  cut: "p90"
-  subsample: 1
-  text_params: {"input": "text"}
-  video_params:
-    input_res_h: *ResolutionH  # todo: check the input_res_h
-    input_res_w: *ResolutionW  # todo: check the input_res_w
-    tsfm_params:
-      norm_mean: [0.5, 0.5, 0.5]
-      norm_std: [0.5, 0.5, 0.5]
-    num_frames: *FrameLength
-    prop_factor: *InputFPS
-    loading: "lax"
-  metadata_folder_name: "webvid10m_meta"
-  first_stage_key: "video"
-  cond_stage_key: "txt"
-  skip_missing_files: False
 
+  # The width and height in which you want your training data to be resized to.
+  width:  512
+  height: 512
+
+  # This will find the closest aspect ratio to your input width and height. 
+  # For example, 512x512 width and height with a video of resolution 1280x720 will be resized to 512x256
+  use_bucketing: False
+  return_mask: True
+  return_motion: True
+
+  # The start frame index where your videos should start (Leave this at one for json and folder based training).
+  sample_start_idx: 1
+
+  # Used for 'folder'. The rate at which your frames are sampled. Does nothing for 'json' and 'single_video' dataset.
+  # high fps, lower frame step, move slowly
+  fps: 6
+
+  # For 'single_video' and 'json'. The number of frames to "step" (1,2,3,4) (frame_step=2) -> (1,3,5,7, ...).  
+  frame_step: 1
+
+  # The number of frames to sample. The higher this number, the higher the VRAM (acts similar to batch size).
+  n_sample_frames: 25
+  
+  # 'single_video'
+  single_video_path: "/data/datasets/animal_kingdom/video_grounding/dataset/AADJBFXO.mp4"
+
+  # The prompt when using a a single video file
+  single_video_prompt: "a bird"
+
+  # Fallback prompt if caption cannot be read. Enabled for 'image' and 'folder'.
+  fallback_prompt: ''
+  
+  # 'folder'
+  #path: "/data2/webvid/data/videos/004151_004200"
+  path: "/home/aiscuser/locomotion_video_whole_mp4/"
+
+  # 'json'
+  json_path: '/home/aiscuser/animate-anything-signal/example/signal_2_4_new_vlip.json'
+
+  # 'image'
+  image_dir: '/vlp/datasets/images/coco'
+  image_json: '/vlp/datasets/images/coco/coco_karpathy_train.json'
+
+  video_dir: '/webvid/webvid/data/videos'
+  video_json: '/webvid/webvid/data/40K.json'
+  # The prompt for all image files. Leave blank to use caption files (.txt) 
+  single_img_prompt: ""
+
+ 
 # Validation data parameters.
 validation_data:
 
-  # A custom prompt that is different from your training dataset.
-  prompt: "a girl moves body"
+  # A custom prompt that is different from your training dataset. 
+  prompt: "Test"
 
-  prompt_image: "example/pig0.jpg"
-
-  image_path: "example"
+  prompt_image: ["example/frame_r2.jpg", "example/frame_r4.jpg","example/frame_r5.jpg", "example/frame_r7.jpg", "example/frame_r8.jpg", "example/frame_r9.jpg", "example/frame_r12.jpg"]
+  signal: ["example/frame_r2.pt", "example/frame_r4.pt","example/frame_r5.pt", "example/frame_r7.pt", "example/frame_r8.pt", "example/frame_r9.pt", "example/frame_r12.pt"]
 
   # Whether or not to sample preview during training (Requires more VRAM).
   sample_preview: True
 
   # The number of frames to sample during validation.
-  num_frames: *FrameLength
+  num_frames: 25
 
   # Height and width of validation sample.
-  width: *ResolutionW
-  height: *ResolutionH
+  width:  512
+  height: 512
 
   # Number of inference steps when generating the video.
   num_inference_steps: 25
@@ -187,7 +192,7 @@ validation_data:
   guidance_scale: 9
 
   # fps
-  fps: *InputFPS
+  fps: 6
 
   # The motion bucket ID. Used as conditioning for the generation. The higher the number the more motion will be in the video.
   motion_bucket_id: 127
@@ -195,10 +200,11 @@ validation_data:
   # The number of frames to decode at a time. The higher the chunk size, the higher the temporal consistency between frames,
   # but also the higher the memory consumption. By default, the decoder will decode all frames at once for maximal quality.
   # Reduce `decode_chunk_size` to reduce memory usage.
+  # decode_chunk_size: 7
   decode_chunk_size: 8
 
 # Learning rate for AdamW
-learning_rate: *BaseLearningRate
+learning_rate: 5.0e-06
 
 # Weight decay. Higher = more regularization. Lower = closer to dataset.
 adam_weight_decay: 0
@@ -214,36 +220,31 @@ extra_text_encoder_params: null
   #adam_weight_decay: 0.2
 
 # How many batches to train. Not to be confused with video frames.
-train_batch_size: 1
-
+train_batch_size: 2
 # Maximum number of train steps. Model is saved after training.
 max_train_steps: 1000000
 
 # Saves a model every nth step.
-checkpointing_steps: 4000
+checkpointing_steps: 2500
 
 # How many steps to do for validation if sample_preview is enabled.
-validation_steps: 500
+validation_steps: 1000
 
 # Which modules we want to unfreeze for the UNET. Advanced usage.
 trainable_modules:
-  # - "all"
+  - "all"
   # If you want to ignore temporal attention entirely, remove "attn1-2" and replace with ".attentions"
   # This is for self attetion. Activates for spatial and temporal dimensions if n_sample_frames > 1
-  # - "attn1"
-  # - ".attentions"
-
+  - "attn1"
+  - ".attentions"
+  
   # This is for cross attention (image & text data). Activates for spatial and temporal dimensions if n_sample_frames > 1
-  # - "attn2"
-  # - "conv_in"
-
+  - "attn2"
+  - "conv_in"
+  
   #  Convolution networks that hold temporal information. Activates for spatial and temporal dimensions if n_sample_frames > 1
-  # - "temp_conv"
-  # - "motion"
-
-  # Downsample and upsample temporal layers
-  - "downsample_temporal"
-  - "upsample_temporal"
+  - "temp_conv"
+  - "motion"
 
 
 # Which modules we want to unfreeze for the Text Encoder. Advanced usage.
@@ -256,7 +257,7 @@ seed: 42
 mixed_precision: "fp16"
 
 # This seems to be incompatible at the moment.
-use_8bit_adam: False
+use_8bit_adam: False 
 
 # Trades VRAM usage for speed. You lose roughly 20% of training speed, but save a lot of VRAM.
 # If you need to save more VRAM, it can also be enabled for the text encoder, but reduces speed x2.

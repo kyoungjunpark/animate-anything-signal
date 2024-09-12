@@ -848,7 +848,7 @@ def main_eval(
     else:
         eval_list = [[validation_data.prompt_image, validation_data.prompt]]
 
-    output_dir = "output/svd_out"
+    output_dir = "output/svd_vanila"
     iters = 5
     for example in eval_list:
         for t in range(iters):
