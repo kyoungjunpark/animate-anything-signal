@@ -100,8 +100,8 @@ def get_frame_batch(max_frames, sample_fps, vr, transform):
     frame_range = range(0, max_range, frame_step)
     if len(frame_range) < max_frames:
         frame_range = np.linspace(0, max_range - 1, max_frames).astype(int)
-    # start = random.randint(0, len(frame_range) - max_frames)
-    start = len(frame_range) - max_frames
+    start = random.randint(0, len(frame_range) - max_frames)
+    # start = len(frame_range) - max_frames
     frame_range_indices = list(frame_range)[start:start + max_frames]
     frames = vr.get_batch(frame_range_indices)
     video = rearrange(frames, "f h w c -> f c h w")

@@ -635,7 +635,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("svd_vanila")
+        accelerator.init_trackers("svd_vanila with random data & random start")
 
     # Train!
     total_batch_size = train_batch_size * accelerator.num_processes * gradient_accumulation_steps
@@ -848,7 +848,7 @@ def main_eval(
     else:
         eval_list = [[validation_data.prompt_image, validation_data.prompt]]
 
-    output_dir = "output/svd_vanila"
+    output_dir = "output/svd_vanila_random"
     iters = 5
     for example in eval_list:
         for t in range(iters):
