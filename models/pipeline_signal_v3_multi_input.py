@@ -232,7 +232,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
     @torch.no_grad()
     def __call__(
             self,
-            image,
+            video,
             height: int = 576,
             width: int = 1024,
             num_frames: Optional[int] = None,
@@ -250,16 +250,18 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
             callback_on_step_end: Optional[Callable[[int, int, Dict], None]] = None,
             callback_on_step_end_tensor_inputs: List[str] = ["latents"],
             return_dict: bool = True,
+            n_input_frames=5,
             mask=None,
             signal=None,
             sig1=None,
-            sig2=None
+            sig2=None,
+            img1=None
     ):
         r"""
         The call function to the pipeline for generation.
 
         Args:
-            image (`PIL.Image.Image` or `List[PIL.Image.Image]` or `torch.FloatTensor`):
+            video (`PIL.Image.Image` or `List[PIL.Image.Image]` or `torch.FloatTensor`):
                 Image or images to guide image generation. If you provide a tensor, it needs to be compatible with
                 [`CLIPImageProcessor`](https://huggingface.co/lambdalabs/sd-image-variations-diffusers/blob/main/feature_extractor/preprocessor_config.json).
             height (`int`, *optional*, defaults to `self.unet.config.sample_size * self.vae_scale_factor`):
@@ -339,56 +341,68 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         decode_chunk_size = decode_chunk_size if decode_chunk_size is not None else num_frames
 
         # 1. Check inputs. Raise error if not correct
-        self.check_inputs(image, height, width)
+        self.check_inputs(video, height, width)
 
         # 2. Define call parameters
-        if isinstance(image, PIL.Image.Image):
+        if isinstance(video, PIL.Image.Image):
             batch_size = 1
-        elif isinstance(image, list):
-            batch_size = len(image)
+        elif isinstance(video, list):
+            batch_size = len(video)
         else:
-            batch_size = image.shape[0]
-        assert batch_size == 1
+            batch_size = 1
+
+        # assert batch_size == 1
         device = self._execution_device
         # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
         # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
         # corresponds to doing no classifier free guidance.
         do_classifier_free_guidance = max_guidance_scale > 1.0
-
+        # print(video.size()) # should be torch.Size([3, 480, 640]
+        # video = video.half().to(device)
         # 3. Encode input image
-        image_embeddings = self._encode_image(image, device, num_videos_per_prompt, do_classifier_free_guidance)
+        video = video.unsqueeze(0).to(device)
+        dtype = self.vae.dtype
+
+        # enocde image latent
+        image = video[:, 0:n_input_frames].to(dtype)
+        image = rearrange(image, 'b f c h w-> (b f) c h w').to(dtype)
+
+        # print("image", image.size())  # torch.Size([2, 3, 512, 512]) -> # torch.Size([(2, 5), 3, 512, 512])
+        import math, random
+        noise_aug_strength = math.exp(random.normalvariate(mu=-3, sigma=0.5))
+        image = image + noise_aug_strength * torch.randn_like(image)
+        image_latent = self.vae.encode(image).latent_dist.mode() * self.vae.config.scaling_factor
+        image_latent = rearrange(image_latent, '(b f) c h w-> (b c) f h w', b=batch_size).to(dtype)
+
+        # print("image_latent", image_latent.size())  # torch.Size([2, 4, 64, 64]) -> # torch.Size([(2, 5), 4, 64, 64])
+        # image_latent = rearrange(image_latent, '(b f) c h w-> b f c h w', b=bsz).to(dtype)
+        image_pool = img1.to(image_latent.device)
+        image_latent = image_pool(image_latent)
+        print("pool", image_latent.size())
+
+        image_latent = rearrange(image_latent, '(b c) f h w-> b c f h w', b=batch_size).to(dtype)
+        image_latent = torch.squeeze(image_latent, dim=2)
+
+        # image_embeddings = self._encode_image(video[0], device, num_videos_per_prompt, do_classifier_free_guidance)
+        print("image_latent", image_latent.size()) # image_latent torch.Size([1, 4, 60, 80])
 
         # NOTE: Stable Diffusion Video was conditioned on fps - 1, which
         # is why it is reduced here.
         # See: https://github.com/Stability-AI/generative-models/blob/ed0997173f98eaf8f4edf7ba5fe8f15c6b877fd3/scripts/sampling/simple_video_sample.py#L188
         fps = fps - 1
 
-        # 4. Encode input image using VAE
-        image = self.image_processor.preprocess(image, height=height, width=width)
-        noise = randn_tensor(image.shape, generator=generator, device=image.device, dtype=image.dtype)
-        image = image + noise_aug_strength * noise
-
-        needs_upcasting = self.vae.dtype == torch.float16 and self.vae.config.force_upcast
-        if needs_upcasting:
-            self.vae.to(dtype=torch.float32)
-
-        image_latents = self._encode_vae_image(image, device, num_videos_per_prompt, do_classifier_free_guidance)
-        image_latents = image_latents.to(image_embeddings.dtype)
-
-        # cast back to fp16 if needed
-        if needs_upcasting:
-            self.vae.to(dtype=torch.float16)
-
         # Repeat the image latents for each frame so we can concatenate them with the noise
         # image_latents [batch, channels, height, width] ->[batch, num_frames, channels, height, width]
-        image_latents = image_latents.unsqueeze(1).repeat(1, num_frames, 1, 1, 1)
+        # image_latents = image_latents.unsqueeze(1).repeat(1, num_frames, 1, 1, 1)
+        image_latent = repeat(image_latent, 'b c h w->b f c h w', f=num_frames)
+
         # mask = repeat(mask, '1 h w -> 2 f 1 h w', f=num_frames)
         # 5. Get Added Time IDs
         added_time_ids = self._get_add_time_ids(
             fps,
             motion_bucket_id,
             noise_aug_strength,
-            image_embeddings.dtype,
+            video.dtype,
             batch_size,
             num_videos_per_prompt,
             do_classifier_free_guidance,
@@ -407,7 +421,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
             num_channels_latents,
             height,
             width,
-            image_embeddings.dtype,
+            image_latent.dtype,
             device,
             generator,
             latents,
@@ -435,16 +449,10 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
 
         frame_range_indices = list(frame_range)[1:1 + num_frames]
 
-
         # print(signal_values.unsqueeze(0).size())
         signal_values = load_channel(signal_values, frame_step, frame_range_indices)
         signal_values = signal_values.unsqueeze(0)
 
-
-        # print("unsqueeze", signal_values.size())
-
-        # signal_encoder = LatentSignalEncoder(input_dim=signal_values.size(-1) * signal_values.size(-2), output_dim=1024).to(device)
-        # signal_encoder2 = LatentSignalEncoder(output_dim=latents.size(-1) * latents.size(-2)).to(device)
         signal_encoder = sig1
         signal_encoder2 = sig2
         # bsz = signal_values.size(0)
@@ -452,30 +460,27 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
 
         # [B, FPS, 512] -> [B * FPS, 512]
         signal_values_reshaped = rearrange(signal_values, 'b (f c) h-> b f c h', c=frame_step)  # [B, FPS, 32]
-        signal_embeddings = signal_encoder(signal_values_reshaped)
-        # print("1", signal_embeddings.size())
-        signal_embeddings = signal_embeddings.reshape(batch_size * num_frames, 1, -1)
+        signal_values_reshaped_input = signal_values_reshaped[:, 0:n_input_frames]
+        # print("signal_values_reshaped_input", signal_values_reshaped.size())
 
-        # print("signal_values_resized", signal_values_resized.size())
+        signal_embeddings = signal_encoder(signal_values_reshaped_input)
+        # print("signal_encoder", signal_values_reshaped.size())
+
+        signal_embeddings = signal_embeddings.reshape(batch_size, 1, -1)
         signal_embeddings2 = signal_encoder2(signal_values_reshaped)
 
-        # signal_embeddings = signal_embeddings.reshape(signal_embeddings.size(0), 1, -1)
-        # signal_resize_encoder = SignalResizeEncoder(input_dim=signal_embeddings.size(-1), output_dim=1024).half().to(device)
-        # image_resize_encoder = ImageResizeEncoder(input_dim=image_embeddings.size(-1), output_dim=512).half().to(device)
-
-        # image_embeddings = image_resize_encoder(image_embeddings.half())
-        # signal_embeddings_resized = signal_resize_encoder(signal_embeddings.half())
-
-        # Change cross attention (use condition how motion) for signal sensing (see text embedding from animate-anything)
-
         # encoder_hidden_states = torch.cat((image_embeddings, signal_embeddings), dim=2)
-        encoder_hidden_states = signal_embeddings.to(image_embeddings.dtype)
-        mask = signal_embeddings2.to(image_embeddings.dtype)
+        encoder_hidden_states = signal_embeddings.to(dtype)
+        mask = signal_embeddings2.to(dtype)
         # print("mask ", mask.size()) # mask, torch.Size([1, 25, 1, 56, 72])
 
         mask = torch.cat([mask] * 2) if do_classifier_free_guidance else mask
+        image_latent = torch.cat([image_latent] * 2) if do_classifier_free_guidance else image_latent
+
         encoder_hidden_states = torch.cat(
             [encoder_hidden_states] * 2) if do_classifier_free_guidance else encoder_hidden_states
+
+        encoder_hidden_states = encoder_hidden_states.repeat_interleave(repeats=num_frames, dim=0)
 
         # 8. Denoising loop
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
@@ -485,9 +490,12 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
+                print(mask.size(), latent_model_input.size(), image_latent.size())
+                # torch.Size([2, 25, 1, 8, 8]) torch.Size([2, 25, 4, 8, 8]) torch.Size([2, 25, 4, 8, 8])
+                # torch.Size([2, 20, 1, 8, 8]) torch.Size([2, 20, 4, 8, 8]) torch.Size([2, 20, 4, 8, 8])
 
                 # Concatenate image_latents over channels dimention
-                latent_model_input = torch.cat([mask, latent_model_input, image_latents], dim=2)
+                latent_model_input = torch.cat([mask, latent_model_input, image_latent], dim=2)
 
                 # predict the noise residual
                 noise_pred = self.unet(
@@ -519,8 +527,6 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
 
         if not output_type == "latent":
             # cast back to fp16 if needed
-            if needs_upcasting:
-                self.vae.to(dtype=torch.float16)
             frames = self.decode_latents(latents, num_frames, decode_chunk_size)
             frames = svd_tensor2vid(frames, self.image_processor, output_type=output_type)
         else:

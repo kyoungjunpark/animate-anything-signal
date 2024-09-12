@@ -129,15 +129,72 @@ class LatentSignal2DEncoder(torch.nn.Module):
         return x
 
 
+class TransformNet(nn.Module):
+    def __init__(self, input_size=512, output_size=512, n_input_frames=5, frame_step=2):
+        super(TransformNet, self).__init__()
+        self.flatten = nn.Flatten(start_dim=1)
+        self.fc1 = nn.Linear(n_input_frames * frame_step * input_size, 128)  # Hidden layer with 128 units
+        self.fc2 = nn.Linear(128, output_size)  # Output layer to map to 512
+        self.reshape = nn.Unflatten(1, (1, output_size))  # Reshape to (1, 512)
+
+    def forward(self, x):
+        x = self.flatten(x)  # Flatten to (batch, 5 * 3 * 512)
+        x = self.fc1(x)  # Apply first Linear layer (hidden layer)
+        x = self.fc2(x)  # Apply second Linear layer
+        x = self.reshape(x)  # Reshape to (batch, 1, 512)
+        return x
+
+
+class MultiSignalEncoder(nn.Module):
+    def __init__(self, input_size=512, output_size=512, n_input_frames=5, frame_step=2):
+        super(MultiSignalEncoder, self).__init__()
+        # Fully connected hidden layers before convolution
+        self.fc1 = nn.Linear(n_input_frames * frame_step * input_size, 128)  # First hidden layer
+        # self.fc2 = nn.Linear(256, 128)  # Second hidden layer
+        # Convolutional layer to reduce channels
+        self.conv = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=1)
+        # Adaptive pooling layer to reduce spatial dimensions to 1x1
+        self.pool = nn.AdaptiveAvgPool2d(output_size=(1, 1))
+        # Output layer to produce final output
+        self.fc3 = nn.Linear(128, output_size)
+
+    def forward(self, x):
+        batch_size = x.size(0)
+
+        # Flatten input tensor and pass through fully connected layers
+        x = x.view(batch_size, -1)  # Flatten the tensor
+        print("1", x.size())
+        x = torch.relu(self.fc1(x))  # First hidden layer with ReLU activation
+        # x = torch.relu(self.fc2(x))  # Second hidden layer with ReLU activation
+        print("2", x.size())
+
+        # Reshape to fit the convolutional layer
+        x = x.view(batch_size, 1, 1, 128)  # Reshape to (batch_size, 1, 1, 128)
+
+        # Apply convolutional and pooling layers
+        x = self.conv(x)  # Convolutional layer
+        x = self.pool(x)  # Pooling layer
+
+        # Flatten output for the final fully connected layer
+        x = x.view(batch_size, -1)  # Flatten the tensor
+        x = self.fc3(x)  # Output layer
+
+        return x
+
+
 class SignalEncoder(nn.Module):
-    def __init__(self, input_size=512, output_size=1024):
+    def __init__(self, input_size=512, frame_step=2, output_size=1024):
         super(SignalEncoder, self).__init__()
         # We first reduce the frame channel dimension (3) with a convolution
-        self.conv1 = nn.Conv1d(in_channels=3, out_channels=8, kernel_size=1)
+        self.conv1 = nn.Conv1d(in_channels=frame_step, out_channels=8, kernel_size=1)
         # Flattening the reduced signal for the next layer
         self.fc1 = nn.Linear(8 * input_size, output_size)
         # Optional non-linearity
         self.relu = nn.ReLU()
+
+        self.conv = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
+        # Step 2: Reduce spatial dimensions to 1x1
+        self.pool = nn.AdaptiveAvgPool2d(output_size=(1, 1))
 
     def forward(self, x):
         # x has shape (batch_size, frames, frame_channel, signal_data)
@@ -163,9 +220,9 @@ class SignalEncoder(nn.Module):
 
 
 class SignalEncoder2(nn.Module):
-    def __init__(self, signal_data_dim, target_h, target_w):
+    def __init__(self, signal_data_dim, target_h, target_w, frame_step=2):
         super(SignalEncoder2, self).__init__()
-        self.conv1 = nn.Conv1d(in_channels=3, out_channels=64, kernel_size=3, padding=1)
+        self.conv1 = nn.Conv1d(in_channels=frame_step, out_channels=64, kernel_size=3, padding=1)
         self.conv2 = nn.Conv1d(in_channels=64, out_channels=128, kernel_size=3, padding=1)
         self.fc = nn.Linear(128 * signal_data_dim, target_h * target_w)
         self.target_h = target_h
@@ -191,6 +248,30 @@ class SignalEncoder2(nn.Module):
         x = x.view(batch_size, frames, 1, self.target_h, self.target_w)
 
         return x
+
+
+class ImageReduction(nn.Module):
+    def __init__(self):
+        super(ImageReduction, self).__init__()
+        self.conv = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
+
+    def forward(self, x):
+        return self.conv(x)
+
+
+class SignalReduction(nn.Module):
+    def __init__(self):
+        super(SignalReduction, self).__init__()
+        # Step 1: Reduce channels from 5 to 1 with a kernel size of 1
+        self.conv = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
+        # Step 2: Reduce spatial dimensions to 1x1
+        self.pool = nn.AdaptiveAvgPool2d(output_size=(1, 1))
+
+    def forward(self, x):
+        x = self.conv(x)  # Reduce channels
+        x = self.pool(x)  # Reduce spatial dimensions
+        return x
+
 
 class UNet384(ModelMixin, ConfigMixin):
     @register_to_config
