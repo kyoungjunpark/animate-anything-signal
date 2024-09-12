@@ -417,6 +417,10 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     latents = vae.encode(frames).latent_dist.mode() * vae.config.scaling_factor
     latents = rearrange(latents, '(b f) c h w-> b f c h w', b=bsz)
 
+    signal_encoder = sig1.to(latents.device)
+    signal_encoder2 = sig2.to(latents.device)
+    image_pool = img1.to(latents.device).to(dtype)
+
     # enocde image latent
     image = pixel_values[:, 0:n_input_frames].to(dtype)
     image = rearrange(image, 'b f c h w-> (b f) c h w').to(dtype)
@@ -430,9 +434,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
 
     # print("image_latent", image_latent.size())  # torch.Size([2, 4, 64, 64]) -> # torch.Size([(2, 5), 4, 64, 64])
     # image_latent = rearrange(image_latent, '(b f) c h w-> b f c h w', b=bsz).to(dtype)
-    image_pool = img1.to(latents.device)
     image_latent = image_pool(image_latent)
-    print("pool", image_latent.size())
 
     # print("image_pool", image_latent.size())  # torch.Size([2, 4, 64, 64]) -> # torch.Size([(2, 5), 4, 64, 64])
 
@@ -487,8 +489,6 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
 
     # signal_encoder = LatentSignalEncoder(input_dim=signal_values.size(-1) * signal_values.size(-2), output_dim=1024).to(device)
     # signal_encoder2 = LatentSignalEncoder(output_dim=input_latents.size(-1) * input_latents.size(-2)).to(device)
-    signal_encoder = sig1.to(latents.device)
-    signal_encoder2 = sig2.to(latents.device)
 
     # [B, FPS, 512] -> [B * FPS, 512]
     # print(signal_values.size())
