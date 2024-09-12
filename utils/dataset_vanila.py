@@ -94,6 +94,7 @@ def get_text_prompt(
 
 
 def get_frame_batch(max_frames, sample_fps, vr, transform):
+    #         video = get_frame_batch(self.n_sample_frames, self.fps, vr, self.transform)
     native_fps = vr.get_avg_fps()
     max_range = len(vr)
     frame_step = max(1, round(native_fps / sample_fps))

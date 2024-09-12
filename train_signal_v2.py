@@ -814,7 +814,7 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, validation_data, out_file, i
 
     signal_encoder2 = sig2
 
-    for image, signal in zip(validation_data.prompt_image, validation_data.signal):
+    for image, signal in zip(sorted(validation_data.prompt_image), sorted(validation_data.signal)):
         image_replaced = image.replace("frame", str(index)+"_frame").replace('.jpg', '.gif')
         target_file = out_file + image_replaced
         directory = os.path.dirname(target_file)

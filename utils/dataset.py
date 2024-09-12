@@ -151,7 +151,7 @@ def get_frame_agg_signal_batch(signal_path, max_frames, sample_fps, vr, transfor
     # print("check", frame_step, start, max_frames, frame_range_indices, max_range, frame_range)
 
     if frame_range_indices[0] - frame_step >= 0:
-        partial_channels = channels[frame_range_indices[0]-frame_step:frame_range_indices[-1], :]
+        partial_channels = channels[frame_range_indices[0] - frame_step:frame_range_indices[-1], :]
         # print(partial_channels.size())  # 75, 512
         # partial_channels = partial_channels.reshape()
     else:
@@ -162,7 +162,7 @@ def get_frame_agg_signal_batch(signal_path, max_frames, sample_fps, vr, transfor
             # frame_range_indices[i-1 ] 0
             if i == 0:
                 if frame_range_indices[i] >= frame_step:
-                    tmp_channel = channels[frame_range_indices[i]-frame_step:frame_range_indices[i], :]
+                    tmp_channel = channels[frame_range_indices[i] - frame_step:frame_range_indices[i], :]
                     assert tmp_channel.size(0) == frame_step
                     partial_channels.append(tmp_channel)
                 else:
@@ -179,21 +179,21 @@ def get_frame_agg_signal_batch(signal_path, max_frames, sample_fps, vr, transfor
 
                 # frame_diff 3
                 if frame_diff == frame_step + 1:
-                    tmp_channel = channels[frame_range_indices[i-1]:frame_range_indices[i], :]
+                    tmp_channel = channels[frame_range_indices[i - 1]:frame_range_indices[i], :]
                     assert tmp_channel.size(0) == frame_step
                     partial_channels.append(tmp_channel)
                 else:
-                    tmp_channel = channels[frame_range_indices[i-1]:frame_range_indices[i], :]
+                    tmp_channel = channels[frame_range_indices[i - 1]:frame_range_indices[i], :]
 
-                    first_element = channels[frame_range_indices[i-1]]
+                    first_element = channels[frame_range_indices[i - 1]]
                     first_element = first_element.unsqueeze(0)
                     first_element_duplicated = first_element.repeat(frame_step - frame_diff + 1, 1)
                     tmp_channel = torch.cat((first_element_duplicated, tmp_channel), dim=0)
                     assert tmp_channel.size(0) == frame_step, tmp_channel.size()
                     partial_channels.append(tmp_channel)
 
-#            else:
-#                 raise Exception(frame_range_indices)
+            #            else:
+            #                 raise Exception(frame_range_indices)
 
             """
             elif frame_range_indices[i] - frame_range_indices[i-1] == frame_step - 1:
@@ -328,7 +328,8 @@ class VideoBLIPDataset(Dataset):
 
         vr = decord.VideoReader(clip_path)
 
-        video, signal = get_frame_signal_batch(vid_data[self.sig_data_key], self.n_sample_frames, self.fps, vr, self.transform)
+        video, signal = get_frame_signal_batch(vid_data[self.sig_data_key], self.n_sample_frames, self.fps, vr,
+                                               self.transform)
         # video = get_frame_batch(self.n_sample_frames, self.fps, vr, self.transform)
 
         # prompt_ids = np.array(0)
@@ -365,7 +366,8 @@ class VideoBLIPDataset(Dataset):
 
         vr = decord.VideoReader(clip_path)
 
-        video, signal, frame_step = get_frame_agg_signal_batch(vid_data[self.sig_data_key], self.n_sample_frames, self.fps, vr, self.transform)
+        video, signal, frame_step = get_frame_agg_signal_batch(vid_data[self.sig_data_key], self.n_sample_frames,
+                                                               self.fps, vr, self.transform)
         # video = get_frame_batch(self.n_sample_frames, self.fps, vr, self.transform)
 
         # prompt_ids = np.array(0)
@@ -414,6 +416,7 @@ class VideoBLIPDataset_V2(Dataset):
             n_sample_frames: int = 4,
             sample_start_idx: int = 1,
             fps: int = 1,
+            n_input_frames=1,
             json_path: str = "",
             json_data=None,
             vid_data_key: str = "video_path",
@@ -439,6 +442,8 @@ class VideoBLIPDataset_V2(Dataset):
         self.n_sample_frames = n_sample_frames
         self.sample_start_idx = sample_start_idx
         self.fps = fps
+        self.n_input_frames = n_input_frames
+
         self.transform = T.Compose([
             # T.RandomResizedCrop(size=(height, width), scale=(0.8, 1.0), ratio=(width/height, width/height), antialias=False)
             T.Resize(min(height, width), antialias=False),
@@ -507,7 +512,8 @@ class VideoBLIPDataset_V2(Dataset):
 
         vr = decord.VideoReader(clip_path)
 
-        video, signal, frame_step = get_frame_agg_signal_batch(vid_data[self.sig_data_key], self.n_sample_frames, self.fps, vr, self.transform)
+        video, signal, frame_step = get_frame_agg_signal_batch(vid_data[self.sig_data_key], self.n_sample_frames+self.n_input_frames,
+                                                               self.fps, vr, self.transform)
         # video = get_frame_batch(self.n_sample_frames, self.fps, vr, self.transform)
 
         # prompt_ids = np.array(0)
@@ -545,6 +551,7 @@ class VideoBLIPDataset_V2(Dataset):
         if example['motion'] < self.motion_threshold:
             return self.__getitem__(random.randint(0, len(self) - 1))
         return example
+
 
 class SingleVideoDataset(Dataset):
     def __init__(
@@ -955,7 +962,8 @@ class CachedDataset(Dataset):
 
 def get_train_dataset(dataset_types, train_data, tokenizer=None):
     train_datasets = []
-    dataset_cls = [VideoJsonDataset, SingleVideoDataset, ImageDataset, VideoFolderDataset, VideoBLIPDataset, VideoBLIPDataset_V2]
+    dataset_cls = [VideoJsonDataset, SingleVideoDataset, ImageDataset, VideoFolderDataset, VideoBLIPDataset,
+                   VideoBLIPDataset_V2]
     dataset_map = {d.__getname__(): d for d in dataset_cls}
 
     # Loop through all available datasets, get the name, then add to list of data to process.

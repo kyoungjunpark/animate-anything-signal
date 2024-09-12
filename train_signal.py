@@ -868,7 +868,7 @@ def batch_eval(unet, vae, vae_processor, pretrained_model_path,
 
     motion_errors = []
     motion_precisions = []
-    for image, signal in zip(validation_data.prompt_image, validation_data.signal):
+    for image, signal in zip(sorted(validation_data.prompt_image), sorted(validation_data.signal)):
         for t in range(iters):
             # name = os.path.basename(validation_data.prompt_image)
             out_file_dir = f"{output_dir}/{image.split('.')[0]}"

@@ -838,7 +838,7 @@ def eval(pipeline, vae_processor, sig1, sig2, validation_data, out_file, index, 
     # prepare inital latents
     initial_latents = None
 
-    for image, signal in zip(validation_data.prompt_image, validation_data.signal):
+    for image, signal in zip(sorted(validation_data.prompt_image), sorted(validation_data.signal)):
         # print(out_file)
         # print(image)
         image_replaced = image.replace("frame", str(index)+"_frame").replace('.jpg', '.gif')
