@@ -129,6 +129,34 @@ class LatentSignal2DEncoder(torch.nn.Module):
         return x
 
 
+class SignalTransformer(nn.Module):
+    def __init__(self, input_size=512, target_h=1, target_w=1, frame_step=2, n_input_frames=5, output_dim=4):
+        super(SignalTransformer, self).__init__()
+        self.target_w = target_w
+        self.target_h = target_h
+        # Step 1: Transform the signal (512) into spatial dimensions (64x64)
+        self.fc_signal_to_spatial = nn.Linear(input_size, self.target_w * self.target_h)
+        self.conv = nn.Conv2d(in_channels=frame_step, out_channels=1, kernel_size=1)
+
+        # Step 2: Adjust frames and channels.
+        # 1D conv over frames with input=5 frames, output=4 channels
+        self.conv1d_frames = nn.Conv1d(in_channels=15, out_channels=4, kernel_size=1)
+
+    def forward(self, x):
+        # Input: (batch, frames, channels, signal) = [2, 5, 3, 512]
+
+        batch_size, frames, channels, signal = x.shape
+
+        # Step 1: Reshape the signal (512) into (64, 64) spatial dimensions
+        x = x.view(batch_size, frames, channels, -1)  # [2, 5, 3, 512]
+        x = self.fc_signal_to_spatial(x)  # [2, 5, 3, 4096]
+        x = x.view(batch_size * frames, channels, self.target_w, self.target_h)  # [2, 5, 3, 64, 64]
+        x = self.conv(x)  # 10, 1, 64, 64
+
+        x = x.reshape(batch_size, 1, frames, self.target_w, self.target_h)  # [2, 15, 4096]
+
+        return x
+
 class TransformNet(nn.Module):
     def __init__(self, input_size=512, output_size=512, n_input_frames=5, frame_step=2):
         super(TransformNet, self).__init__()
@@ -142,6 +170,37 @@ class TransformNet(nn.Module):
         x = self.fc1(x)  # Apply first Linear layer (hidden layer)
         x = self.fc2(x)  # Apply second Linear layer
         x = self.reshape(x)  # Reshape to (batch, 1, 512)
+        return x
+
+
+class FrameToSignalNet(nn.Module):
+    def __init__(self, input_size=512, n_input_frames=5, output_size=512, frame_step=2):
+        super(FrameToSignalNet, self).__init__()
+        # Flatten input of shape [batch, 5, 3, 512] to [batch, 7680]
+        self.flatten = nn.Flatten()
+
+        # Fully connected layer to reduce [batch, 7680] to [batch, 1024]
+        self.fc1 = nn.Linear(n_input_frames * frame_step * input_size, 128)  # Hidden layer with 128 units
+        self.fc2 = nn.Linear(128, output_size)  # Output layer to map to 512
+
+        # Optionally, add a ReLU activation and a reshaping layer
+        self.relu = nn.ReLU()
+
+        # Reshape to [batch, 1, 1024]
+        self.reshape = lambda x: x.unsqueeze(1)
+
+    def forward(self, x):
+        # Step 1: Flatten to [batch, 7680]
+        x = self.flatten(x)
+
+        x = self.fc1(x)  # Apply first Linear layer (hidden layer)
+        x = self.fc2(x)  # Apply second Linear layer
+        # Step 3: Apply activation function (optional)
+        x = self.relu(x)
+
+        # Step 4: Reshape to [batch, 1, 1024]
+        x = self.reshape(x)
+
         return x
 
 
@@ -163,11 +222,8 @@ class MultiSignalEncoder(nn.Module):
 
         # Flatten input tensor and pass through fully connected layers
         x = x.view(batch_size, -1)  # Flatten the tensor
-        print("1", x.size())
         x = torch.relu(self.fc1(x))  # First hidden layer with ReLU activation
         # x = torch.relu(self.fc2(x))  # Second hidden layer with ReLU activation
-        print("2", x.size())
-
         # Reshape to fit the convolutional layer
         x = x.view(batch_size, 1, 1, 128)  # Reshape to (batch_size, 1, 1, 128)
 
@@ -201,7 +257,7 @@ class SignalEncoder(nn.Module):
         batch_size, frames, frame_channel, signal_data = x.size()
 
         # Apply convolution along the frame_channel dimension
-        x = x.view(batch_size * frames, frame_channel, signal_data)  # Reshape for Conv1d
+        x = x.reshape(batch_size * frames, frame_channel, signal_data)  # Reshape for Conv1d
         x = self.conv1(x)  # Shape: (batch_size * frames, out_channels=8, signal_data)
 
         # Flatten the convolution output to apply the linear layer
@@ -220,7 +276,7 @@ class SignalEncoder(nn.Module):
 
 
 class SignalEncoder2(nn.Module):
-    def __init__(self, signal_data_dim, target_h, target_w, frame_step=2):
+    def __init__(self, signal_data_dim=512, target_h=1, target_w=1, frame_step=2):
         super(SignalEncoder2, self).__init__()
         self.conv1 = nn.Conv1d(in_channels=frame_step, out_channels=64, kernel_size=3, padding=1)
         self.conv2 = nn.Conv1d(in_channels=64, out_channels=128, kernel_size=3, padding=1)
@@ -251,9 +307,9 @@ class SignalEncoder2(nn.Module):
 
 
 class ImageReduction(nn.Module):
-    def __init__(self):
+    def __init__(self, input_dim=4):
         super(ImageReduction, self).__init__()
-        self.conv = nn.Conv2d(in_channels=5, out_channels=1, kernel_size=1)
+        self.conv = nn.Conv2d(in_channels=input_dim, out_channels=1, kernel_size=1)
 
     def forward(self, x):
         return self.conv(x)

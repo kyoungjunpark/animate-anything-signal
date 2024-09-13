@@ -512,7 +512,7 @@ class VideoBLIPDataset_V2(Dataset):
 
         vr = decord.VideoReader(clip_path)
 
-        video, signal, frame_step = get_frame_agg_signal_batch(vid_data[self.sig_data_key], self.n_sample_frames+self.n_input_frames,
+        video, signal, frame_step = get_frame_agg_signal_batch(vid_data[self.sig_data_key], self.n_sample_frames,
                                                                self.fps, vr, self.transform)
         # video = get_frame_batch(self.n_sample_frames, self.fps, vr, self.transform)
 

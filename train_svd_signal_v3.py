@@ -427,7 +427,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
         do_rescale=False,
         return_tensors="pt",
     ).pixel_values
-    image_embeddings = pipeline._encode_image(images, device, 1, False)
+    # image_embeddings = pipeline._encode_image(images, device, 1, False)
     # print("image_embedding: ", image_embeddings.size()) image_embedding:  torch.Size([2, 1, 1024])
     rnd_normal = torch.randn([bsz, 1, 1, 1, 1], device=device)
     sigma = (rnd_normal * P_std + P_mean).exp()

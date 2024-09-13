@@ -71,7 +71,7 @@ class UNetSpatioTemporalConditionModel(ModelMixin, ConfigMixin, UNet2DConditionL
         self,
         sample_size: Optional[int] = None,
         # in_channels: int = 8,
-        in_channels: int = 9,  # for signal
+        in_channels: int = 8 + 5,  # for signal
         out_channels: int = 4,
         down_block_types: Tuple[str] = (
             "CrossAttnDownBlockSpatioTemporal",

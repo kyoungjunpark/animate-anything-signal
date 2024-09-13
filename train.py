@@ -91,6 +91,7 @@ def load_primary_models(pretrained_model_path, in_channels=-1, motion_strength=F
     text_encoder = CLIPTextModel.from_pretrained(pretrained_model_path, subfolder="text_encoder")
     vae = AutoencoderKL.from_pretrained(pretrained_model_path, subfolder="vae")
     unet = UNet3DConditionModel.from_pretrained(pretrained_model_path, subfolder="unet")
+
     if in_channels > 0 and unet.config.in_channels != in_channels:
         # first time init, modify unet conv in
         unet2 = unet
