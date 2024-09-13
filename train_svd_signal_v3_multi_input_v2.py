@@ -526,7 +526,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     added_time_ids = added_time_ids.to(device)
 
     loss = 0
-    print(mask.size(), input_latents.size(), signal_initial_latent.size())
+    # print(mask.size(), input_latents.size(), signal_initial_latent.size())
     latent_model_input = torch.cat([mask, input_latents, signal_initial_latent], dim=2)
 
     accelerator.wait_for_everyone()
@@ -900,13 +900,14 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, img1, validation_data, out_f
 
         # pimg = Image.open(image)
         vr = decord.VideoReader(image)
-        frame_range = list(range(0, 10, 2))
-        frames = vr.get_batch(frame_range)
+        frame_range = list(range(0, len(vr), 3))
+        frames = vr.get_batch(frame_range[0:validation_data.num_frames])
         video = rearrange(frames, "f h w c -> f c h w")
         video = transform(video)
         video = normalize_input(video)
 
         signal = torch.load(signal, map_location="cuda:0", weights_only=True).to(dtype).to(device)
+        signal = signal[0:validation_data.num_frames]
         with torch.no_grad():
             if motion_mask:
                 # h, w = validation_data.height // pipeline.vae_scale_factor, validation_data.width // pipeline.vae_scale_factor
