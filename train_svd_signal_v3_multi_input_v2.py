@@ -112,7 +112,7 @@ def load_primary_models(pretrained_model_path, frame_step, n_input_frames, width
         unet.conv_in.weight.data[:, in_channels - load_in_channel:] = copy.deepcopy(unet2.conv_in.weight.data)
         pipeline.unet = unet
 
-        print(f"Unet channel is changed from {prev_channel} to {pipeline.unet.config.in_channels}")
+        print(f"#########Unet channel is changed from {prev_channel} to {pipeline.unet.config.in_channels} ########")
         del unet2
     CHIRP_LEN = 512
     encoder_hidden_dim = 1024
@@ -522,7 +522,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
 
     loss = 0
     # print(mask.size(), input_latents.size(), signal_initial_latent.size())
-    latent_model_input = torch.cat([mask, input_latents, signal_initial_latent], dim=2)
+    latent_model_input = torch.cat([signal_initial_latent, mask, input_latents], dim=2)
 
     accelerator.wait_for_everyone()
     # print(input_latents.size(), c_noise.size(), encoder_hidden_states.size(), added_time_ids.size())
@@ -718,7 +718,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("svd_with_signal_v3_v2_agg_sig_rand_start_2step_5inputs")
+        accelerator.init_trackers("svd_agg_sig_rand_start_2step_5inputs_w_pretrained_freeze")
         wandb.require("core")
 
     # Train!

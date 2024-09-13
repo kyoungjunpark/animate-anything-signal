@@ -365,7 +365,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
 
         image = video
         image = rearrange(image, 'b f c h w-> (b f) c h w').to(dtype)
-        print("image", image.size())
+        # print("image", image.size())
         # print("image", image.size())  # torch.Size([2, 3, 512, 512]) -> # torch.Size([(2, 5), 3, 512, 512])
         import math, random
         noise_aug_strength = math.exp(random.normalvariate(mu=-3, sigma=0.5))
@@ -373,10 +373,10 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         # frames = rearrange(image, 'b f c h w-> (b f) c h w').to(dtype)
 
         latents = self.vae.encode(latents).latent_dist.mode() * self.vae.config.scaling_factor
-        print("latents0", latents.size())
+        # print("latents0", latents.size())
 
         latents = rearrange(latents, '(b f) c h w-> b f c h w', b=batch_size)  # 1 Channel
-        print("latents", latents.size())
+        # print("latents", latents.size())
 
         # enocde image latent
         image = video[:, 0:n_input_frames].to(dtype)
@@ -527,7 +527,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
                 # print(mask.size(), latent_model_input.size(), signal_initial_latent.size())
                 # torch.Size([2, 25, 1, 8, 8]) torch.Size([2, 25, 7, 8, 8]) torch.Size([1, 25, 5, 8, 8]) torch.Size([1, 25, 5, 8, 8]
                 # Concatenate image_latents over channels dimention
-                latent_model_input = torch.cat([mask, latent_model_input, signal_initial_latent], dim=2).to(dtype)
+                latent_model_input = torch.cat([signal_initial_latent, mask, latent_model_input], dim=2).to(dtype)
 
                 # predict the noise residual
                 noise_pred = self.unet(
