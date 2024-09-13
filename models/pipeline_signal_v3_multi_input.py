@@ -87,7 +87,7 @@ def load_channel(channels, frame_step, frame_range_indices):
 
                     first_element = channels[0]
                     first_element = first_element.unsqueeze(0)
-                    print("here", frame_step, frame_range_indices[i], first_element.size())
+                    # print("here", frame_step, frame_range_indices[i], first_element.size())
                     first_element_duplicated = first_element.repeat(frame_step - frame_range_indices[i], 1)
                     tmp_channel = torch.cat((first_element_duplicated, tmp_channel), dim=0)
                     assert tmp_channel.size(0) == frame_step, tmp_channel.size()

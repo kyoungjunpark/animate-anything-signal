@@ -87,7 +87,6 @@ def load_channel(channels, frame_step, frame_range_indices):
 
                     first_element = channels[0]
                     first_element = first_element.unsqueeze(0)
-                    # print("here", frame_step, frame_range_indices[i], first_element.size())
                     first_element_duplicated = first_element.repeat(frame_step - frame_range_indices[i], 1)
                     tmp_channel = torch.cat((first_element_duplicated, tmp_channel), dim=0)
                     assert tmp_channel.size(0) == frame_step, tmp_channel.size()
@@ -361,8 +360,8 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         # print(video.size()) # should be torch.Size([3, 480, 640]
         # video = video.half().to(device)
         # 3. Encode input image
-        video = video.unsqueeze(0).to(device)
         dtype = self.vae.dtype
+        video = video.unsqueeze(0).to(device)
 
         image = video
         image = rearrange(image, 'b f c h w-> (b f) c h w').to(dtype)
@@ -498,13 +497,11 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         # encoder_hidden_states = torch.cat((image_embeddings, signal_embeddings), dim=2)
         encoder_hidden_states = signal_embeddings.to(dtype)
         mask = signal_embeddings2.to(dtype)
-        # print("mask ", mask.size()) # mask, torch.Size([1, 25, 1, 56, 72])
 
         # here for intiial signal embedding
         signal_initial_latent = signal_encoder3(signal_values_reshaped_input)
         signal_initial_latent = signal_initial_latent.repeat(1, num_frames, 1, 1,
-                                                             1)  # condition_latent torch.Size([1, 50, 20, 8, 8])
-
+                                                             1).to(dtype)
         mask = torch.cat([mask] * 2) if do_classifier_free_guidance else mask
         condition_latent = torch.cat([condition_latent] * 2) if do_classifier_free_guidance else condition_latent
 
@@ -527,10 +524,10 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
                 # k.size(), latent_model_input.size(), image_latent.size())
                 # torch.Size([2, 25, 1, 8, 8]) torch.Size([2, 25, 4, 8, 8]) torch.Size([2, 25, 4, 8, 8])
                 # torch.Size([2, 20, 1, 8, 8]) torch.Size([2, 20, 4, 8, 8]) torch.Size([2, 20, 4, 8, 8])
-                print(mask.size(), latent_model_input.size(), signal_initial_latent.size())
+                # print(mask.size(), latent_model_input.size(), signal_initial_latent.size())
                 # torch.Size([2, 25, 1, 8, 8]) torch.Size([2, 25, 7, 8, 8]) torch.Size([1, 25, 5, 8, 8]) torch.Size([1, 25, 5, 8, 8]
                 # Concatenate image_latents over channels dimention
-                latent_model_input = torch.cat([mask, latent_model_input, signal_initial_latent], dim=2)
+                latent_model_input = torch.cat([mask, latent_model_input, signal_initial_latent], dim=2).to(dtype)
 
                 # predict the noise residual
                 noise_pred = self.unet(

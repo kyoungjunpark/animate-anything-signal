@@ -435,14 +435,13 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     pixel_values = batch['pixel_values']
     bsz, num_frames = pixel_values.shape[:2]
 
-    # print("pixel_values", pixel_values.size())  # torch.Size([2, 25, 3, 512, 512])
     frames = rearrange(pixel_values, 'b f c h w-> (b f) c h w').to(dtype)
     latents = vae.encode(frames).latent_dist.mode() * vae.config.scaling_factor
     latents = rearrange(latents, '(b f) c h w-> b f c h w', b=bsz)  # 1 Channel
 
-    signal_encoder = sig1.to(latents.device)
-    signal_encoder2 = sig2.to(latents.device)
-    signal_encoder3 = sig3.to(latents.device)
+    signal_encoder = sig1.to(latents.device).to(dtype)
+    signal_encoder2 = sig2.to(latents.device).to(dtype)
+    signal_encoder3 = sig3.to(latents.device).to(dtype)
 
     image_pool = img1.to(latents.device).to(dtype)
 
@@ -453,11 +452,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     noise_aug_strength = math.exp(random.normalvariate(mu=-3, sigma=0.5))
     image = image + noise_aug_strength * torch.randn_like(image)
     image_latent = vae.encode(image).latent_dist.mode() * vae.config.scaling_factor # # n_input_frames Channel
-    # image_latent = rearrange(image_latent, '(b f) c h w-> b f c h w', b=bsz).to(dtype) # torch.Size([2, 5, 4, 1, 1])
-    # image_latent = rearrange(image_latent, '(b f) c h w-> (b c) f h w', b=bsz).to(dtype)
 
-    # print("image_latent", image_latent.size())  # torch.Size([2, 4, 64, 64]) -> # torch.Size([(2, 5), 4, 64, 64])
-       # condition_latent = image_latent.repeat(1, num_frames // n_input_frames, 1, 1, 1) # torch.Size([1, 50, 4, 8, 8])
     image_latent = image_pool(image_latent)
     image_latent = rearrange(image_latent, '(b f) c h w-> b c f h w', b=bsz).to(dtype)
     condition_latent = image_latent.repeat(1, num_frames, 1, 1, 1) # condition_latent torch.Size([1, 50, 20, 8, 8])
@@ -717,13 +712,13 @@ def main(
     weight_dtype = is_mixed_precision(accelerator)
 
     # Move text encoders, and VAE to GPU
-    models_to_cast = [text_encoder, vae, sig1, sig2]
+    models_to_cast = [text_encoder, vae, sig1, sig2, sig3, img1]
     cast_to_gpu_and_type(models_to_cast, accelerator.device, weight_dtype)
 
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("svd_with_signal_v3_agg_sig_rand_start_2step_5inputs")
+        accelerator.init_trackers("svd_with_signal_v3_v2_agg_sig_rand_start_2step_5inputs")
         wandb.require("core")
 
     # Train!
@@ -907,7 +902,6 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, img1, validation_data, out_f
         video = normalize_input(video)
 
         signal = torch.load(signal, map_location="cuda:0", weights_only=True).to(dtype).to(device)
-        signal = signal[0:validation_data.num_frames]
         with torch.no_grad():
             if motion_mask:
                 # h, w = validation_data.height // pipeline.vae_scale_factor, validation_data.width // pipeline.vae_scale_factor
