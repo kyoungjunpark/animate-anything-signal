@@ -458,14 +458,10 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
 
     # print("image_latent", image_latent.size())  # torch.Size([2, 4, 64, 64]) -> # torch.Size([(2, 5), 4, 64, 64])
        # condition_latent = image_latent.repeat(1, num_frames // n_input_frames, 1, 1, 1) # torch.Size([1, 50, 4, 8, 8])
-    print("image_latent", image_latent.size())
     image_latent = image_pool(image_latent)
-    print("image_latent2", image_latent.size()) # image_latent2 torch.Size([10, 1, 8, 8]) -> 2, 1, 5, 8, 8
     image_latent = rearrange(image_latent, '(b f) c h w-> b c f h w', b=bsz).to(dtype)
     condition_latent = image_latent.repeat(1, num_frames, 1, 1, 1) # condition_latent torch.Size([1, 50, 20, 8, 8])
     # condition_latent = repeat(image_latent, 'b c h w->b f c h w', f=num_frames)
-
-    print("condition_latent", condition_latent.size())  # torch.Size([2, 25, 4, 64, 64])
 
     pipeline.image_encoder.to(device, dtype=dtype)
 
@@ -480,8 +476,6 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
 
     noisy_latents = latents + torch.randn_like(latents) * sigma
     input_latents = torch.cat([c_in * noisy_latents, condition_latent / vae.config.scaling_factor], dim=2)
-    print("noisy_latents", noisy_latents.size())
-    print("condition_latent", condition_latent.size())
 
     # Signal embedding
     assert "frame_step" in batch.keys(), batch.keys()
@@ -532,8 +526,8 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     added_time_ids = added_time_ids.to(device)
 
     loss = 0
-
-    latent_model_input = torch.cat([mask, input_latents, image_latent, signal_initial_latent], dim=2)
+    print(mask.size(), input_latents.size(), signal_initial_latent.size())
+    latent_model_input = torch.cat([mask, input_latents, signal_initial_latent], dim=2)
 
     accelerator.wait_for_everyone()
     # print(input_latents.size(), c_noise.size(), encoder_hidden_states.size(), added_time_ids.size())
@@ -882,8 +876,9 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, img1, validation_data, out_f
 
     # out_mask_path = os.path.splitext(out_file)[0] + "_mask.jpg"
     # Image.fromarray(np_mask).save(out_mask_path)
-    motion_mask = pipeline.unet.config.in_channels == 9
-    assert pipeline.unet.config.in_channels == 9
+    # motion_mask = pipeline.unet.config.in_channels == 9
+    # assert pipeline.unet.config.in_channels == 9
+    motion_mask = True
     # prepare inital latents
     initial_latents = None
     transform = T.Compose([

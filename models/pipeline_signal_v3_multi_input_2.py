@@ -505,7 +505,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
                 # torch.Size([2, 20, 1, 8, 8]) torch.Size([2, 20, 4, 8, 8]) torch.Size([2, 20, 4, 8, 8])
 
                 # Concatenate image_latents over channels dimention
-                latent_model_input = torch.cat([mask, latent_model_input, image_latent, signal_initial_latent], dim=2)
+                latent_model_input = torch.cat([mask, latent_model_input, condition_latent, signal_initial_latent], dim=2)
 
                 # predict the noise residual
                 noise_pred = self.unet(
