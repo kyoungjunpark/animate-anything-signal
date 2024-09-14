@@ -92,7 +92,7 @@ def create_output_folders(output_dir, config):
 def load_primary_models(pretrained_model_path, frame_step, n_input_frames, width, height, eval=False):
     # 25 = 4(latent/noisy) + 1(signal) // + n_input_frames(5) // 5(initial signal)
     # prev in_channels: cond(4) + noise(1) +
-    in_channels = 8 + 6
+    in_channels = 8 + 9
     if eval:
         pipeline = MaskStableVideoDiffusionPipeline.from_pretrained(pretrained_model_path, torch_dtype=torch.float16,
                                                                     variant='fp16')
@@ -527,7 +527,6 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     latent_model_input = torch.cat([signal_initial_latent, signal_latent, input_latents], dim=2)
 
     accelerator.wait_for_everyone()
-    # print(input_latents.size(), c_noise.size(), encoder_hidden_states.size(), added_time_ids.size())
     # torch.Size([2, 25, 9, 1, 1]) torch.Size([2]) torch.Size([50, 1, 1024]) torch.Size([2, 3])
     model_pred = unet(latent_model_input, c_noise, encoder_hidden_states=encoder_hidden_states,
                       added_time_ids=added_time_ids).sample

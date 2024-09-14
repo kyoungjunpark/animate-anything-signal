@@ -312,7 +312,7 @@ class SignalEncoder2(nn.Module):
         super(SignalEncoder2, self).__init__()
         self.conv1 = nn.Conv1d(in_channels=frame_step, out_channels=64, kernel_size=3, padding=1)
         self.conv2 = nn.Conv1d(in_channels=64, out_channels=128, kernel_size=3, padding=1)
-        self.fc = nn.Linear(128 * signal_data_dim, target_h * target_w)
+        self.fc = nn.Linear(128 * signal_data_dim, target_h * target_w * 4)
         self.target_h = target_h
         self.target_w = target_w
 
@@ -333,7 +333,7 @@ class SignalEncoder2(nn.Module):
         x = self.fc(x)
 
         # Reshape to (batch_size, frames, 1, h, w)
-        x = x.view(batch_size, frames, 1, self.target_h, self.target_w)
+        x = x.view(batch_size, frames, 4, self.target_h, self.target_w)
 
         return x
 
