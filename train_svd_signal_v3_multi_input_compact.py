@@ -44,7 +44,7 @@ from diffusers.pipelines.stable_video_diffusion.pipeline_stable_video_diffusion 
 
 from models.layerdiffuse_VAE import LatentSignalEncoder, SignalEncoder, SignalEncoder2, ImageReduction, \
     MultiSignalEncoder, TransformNet, FrameToSignalNet, SignalTransformer, CompactSignalEncoder2, \
-    CompactSignalTransformer
+    CompactSignalTransformer, CompactImageReduction
 # from models.pipeline_stable_video_diffusion import StableVideoDiffusionPipeline
 from utils.dataset import get_train_dataset, extend_datasets, normalize_input
 from einops import rearrange, repeat
@@ -90,10 +90,10 @@ def create_output_folders(output_dir, config):
     return out_dir
 
 
-def load_primary_models(pretrained_model_path, frame_step, n_input_frames, width, height, eval=False):
+def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, width, height, eval=False):
     # 25 = 4(latent/noisy) + 1(signal) // + n_input_frames(5) // 1(initial signal)
     # prev in_channels = 1 + 4 + 1
-    in_channels = 1 + 4 + 5 + 5
+    in_channels = 1 + 7 + 1 + 1
     if eval:
         pipeline = MaskStableVideoDiffusionPipeline.from_pretrained(pretrained_model_path, torch_dtype=torch.float16,
                                                                     variant='fp16')
@@ -127,10 +127,10 @@ def load_primary_models(pretrained_model_path, frame_step, n_input_frames, width
     input_latents_dim1 = 100
     input_latents_dim2 = 100
 
-    image_encoder = ImageReduction(input_dim=4)
+    image_encoder = CompactImageReduction(input_dim=4, frame_step=frame_step, n_input_frames=n_input_frames, target_h=width // 8, target_w=height // 8)
 
     # signal_encoder2 = LatentSignalEncoder(output_dim=input_latents_dim1 * input_latents_dim2)
-    signal_encoder2 = CompactSignalEncoder2(signal_data_dim=CHIRP_LEN, frame_step=frame_step, target_h=width // 8, target_w=height // 8)
+    signal_encoder2 = CompactSignalEncoder2(signal_data_dim=CHIRP_LEN, fps=fps, frame_step=frame_step, target_h=width // 8, target_w=height // 8)
     signal_encoder3 = CompactSignalTransformer(input_size=CHIRP_LEN, frame_step=frame_step, n_input_frames=n_input_frames, target_h=width // 8, target_w=height // 8)
 
     return pipeline, None, pipeline.feature_extractor, pipeline.scheduler, pipeline.image_processor, \
@@ -372,7 +372,7 @@ def save_pipe(
         output_dir,
         is_checkpoint=False,
         save_pretrained_model=True
-, save_pretrained_model=None):
+):
     if is_checkpoint:
         save_path = os.path.join(output_dir, f"checkpoint-{global_step}")
         os.makedirs(save_path, exist_ok=True)
@@ -507,6 +507,8 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     encoder_hidden_states = encoder_hidden_states.repeat_interleave(repeats=num_frames, dim=0)
 
     signal_embeddings2 = signal_encoder2(signal_values_reshaped)
+    signal_embeddings2 = signal_embeddings2.repeat(1, num_frames, 1, 1, 1) # condition_latent torch.Size([1, 50, 20, 8, 8])
+
     mask = signal_embeddings2
     # Add noise to the latents according to the noise magnitude at each timestep
     # (this is the forward diffusion process) #[bsz, f, c, h , w]
@@ -521,7 +523,6 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     added_time_ids = added_time_ids.to(device)
 
     loss = 0
-    # print(mask.size(), input_latents.size(), signal_initial_latent.size())
     latent_model_input = torch.cat([signal_initial_latent, mask, input_latents], dim=2)
 
     accelerator.wait_for_everyone()
@@ -605,7 +606,7 @@ def main(
 
     # Load scheduler, tokenizer and models. The text encoder is actually image encoder for SVD
     pipeline, tokenizer, feature_extractor, train_scheduler, vae_processor, text_encoder, vae, unet, sig1, sig2, sig3, img1 = load_primary_models(
-        pretrained_model_path, train_data.frame_step, train_data.n_input_frames, train_data.width, train_data.height)
+        pretrained_model_path, train_data.n_sample_frames, train_data.frame_step, train_data.n_input_frames, train_data.width, train_data.height)
     # Freeze any necessary models
     freeze_models([vae, unet])
 
@@ -718,7 +719,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("svd_with_signal_v3_v2_agg_sig_rand_start_2step_5inputs")
+        accelerator.init_trackers("compact_svd_w_signal_v3_v2_agg_sig_rand_start_2step_5inputs")
         wandb.require("core")
 
     # Train!
@@ -898,8 +899,8 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, img1, validation_data, out_f
         frame_range = list(range(0, len(vr), 3))
         frames = vr.get_batch(frame_range[0:validation_data.num_frames])
         video = rearrange(frames, "f h w c -> f c h w")
-        video = transform(video)
-        video = normalize_input(video)
+        # video = transform(video)
+        # video = normalize_input(video)
 
         signal = torch.load(signal, map_location="cuda:0", weights_only=True).to(dtype).to(device)
         with torch.no_grad():
@@ -970,7 +971,7 @@ def main_eval(
     else:
         eval_list = [[validation_data.prompt_image, validation_data.prompt]]
 
-    output_dir = "output/svd_signal_v3"
+    output_dir = "output/svd_signal_v3_compact"
     iters = 5
     for example in eval_list:
         for t in range(iters):

@@ -389,12 +389,15 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         image = image + noise_aug_strength * torch.randn_like(image)
         image_latent = self.vae.encode(image).latent_dist.mode() * self.vae.config.scaling_factor
         # image_latent = rearrange(image_latent, '(b f) c h w-> (b c) f h w', b=batch_size).to(dtype)
+        image_latent = rearrange(image_latent, '(b f) c h w-> b f c h w', b=batch_size).to(dtype)
 
         # print("image_latent", image_latent.size())  # torch.Size([2, 4, 64, 64]) -> # torch.Size([(2, 5), 4, 64, 64])
         # image_latent = rearrange(image_latent, '(b f) c h w-> b f c h w', b=bsz).to(dtype)
         image_pool = img1.to(image_latent.device)
+
         image_latent = image_pool(image_latent)
         image_latent = rearrange(image_latent, '(b f) c h w-> b c f h w', b=batch_size).to(dtype)
+        # image_latent = rearrange(image_latent, '(b f) c h w-> b c f h w', b=batch_size).to(dtype)
         condition_latent = image_latent.repeat(1, num_frames, 1, 1, 1)  # condition_latent torch.Size([1, 50, 20, 8, 8])
 
         # print("image_embedding: ", image_embeddings.size()) image_embedding:  torch.Size([2, 1, 1024])
@@ -496,6 +499,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
 
         # encoder_hidden_states = torch.cat((image_embeddings, signal_embeddings), dim=2)
         encoder_hidden_states = signal_embeddings.to(dtype)
+
         mask = signal_embeddings2.to(dtype)
 
         # here for intiial signal embedding

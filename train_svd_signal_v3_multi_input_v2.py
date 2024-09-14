@@ -91,7 +91,8 @@ def create_output_folders(output_dir, config):
 
 def load_primary_models(pretrained_model_path, frame_step, n_input_frames, width, height, eval=False):
     # 25 = 4(latent/noisy) + 1(signal) // + n_input_frames(5) // 5(initial signal)
-    in_channels = 1 + 4 + 5 + 5
+    # prev in_channels: cond(4) + noise(1) +
+    in_channels = 8 + 6
     if eval:
         pipeline = MaskStableVideoDiffusionPipeline.from_pretrained(pretrained_model_path, torch_dtype=torch.float16,
                                                                     variant='fp16')
@@ -125,7 +126,7 @@ def load_primary_models(pretrained_model_path, frame_step, n_input_frames, width
     input_latents_dim1 = 100
     input_latents_dim2 = 100
 
-    image_encoder = ImageReduction(input_dim=4)
+    image_encoder = ImageReduction(input_dim=5)
 
     # signal_encoder2 = LatentSignalEncoder(output_dim=input_latents_dim1 * input_latents_dim2)
     signal_encoder2 = SignalEncoder2(signal_data_dim=CHIRP_LEN, frame_step=frame_step, target_h=width // 8, target_w=height // 8)
@@ -452,6 +453,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     noise_aug_strength = math.exp(random.normalvariate(mu=-3, sigma=0.5))
     image = image + noise_aug_strength * torch.randn_like(image)
     image_latent = vae.encode(image).latent_dist.mode() * vae.config.scaling_factor # # n_input_frames Channel
+    image_latent = rearrange(image_latent, '(b f) c h w-> b f c h w', b=bsz).to(dtype)
 
     image_latent = image_pool(image_latent)
     image_latent = rearrange(image_latent, '(b f) c h w-> b c f h w', b=bsz).to(dtype)
@@ -522,6 +524,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
 
     loss = 0
     # print(mask.size(), input_latents.size(), signal_initial_latent.size())
+    # print(signal_initial_latent.size(), mask.size(), input_latents.size())
     latent_model_input = torch.cat([signal_initial_latent, mask, input_latents], dim=2)
 
     accelerator.wait_for_everyone()

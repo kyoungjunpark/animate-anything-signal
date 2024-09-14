@@ -182,7 +182,7 @@ class CompactSignalTransformer(nn.Module):
         x = self.fc_signal_to_spatial(x)  # [2, 5, 3, 4096]
         x = x.view(batch_size * frames, channels, self.target_w, self.target_h)  # [2, 5, 3, 64, 64]
         x = self.conv(x)  # 10, 1, 64, 64
-        x = x.view(batch_size, frames, self.target_w, self.target_h)  # [2, 5, 3, 64, 64]
+        x = x.view(batch_size, -1)  # [2, 5, 3, 64, 64]
         x = self.fc2(x)  # 10, 1, 64, 64
         x = x.reshape(batch_size, 1, 1, self.target_w, self.target_h)  # [2, 15, 4096]
 
@@ -339,16 +339,15 @@ class SignalEncoder2(nn.Module):
 
 
 class CompactSignalEncoder2(nn.Module):
-    def __init__(self, signal_data_dim=512, target_h=1, target_w=1, n_input_frames=5, frame_step=2):
+    def __init__(self, signal_data_dim=512, target_h=1, target_w=1, fps=25, frame_step=2):
         super(CompactSignalEncoder2, self).__init__()
         self.conv1 = nn.Conv1d(in_channels=frame_step, out_channels=64, kernel_size=3, padding=1)
         self.conv2 = nn.Conv1d(in_channels=64, out_channels=128, kernel_size=3, padding=1)
         self.fc = nn.Linear(128 * signal_data_dim, target_h * target_w)
-        self.fc2 = nn.Linear(n_input_frames * target_h * target_w, target_h * target_w)
+        self.fc2 = nn.Linear(fps * target_h * target_w, target_h * target_w)
 
         self.target_h = target_h
         self.target_w = target_w
-        self.n_input_frames = n_input_frames
 
     def forward(self, x):
         batch_size, frames, channels, signal_data = x.shape
@@ -365,7 +364,9 @@ class CompactSignalEncoder2(nn.Module):
         # Flatten and apply the fully connected layer to get the desired h and w
         x = x.view(batch_size * frames, -1)  # Flatten the conv output
         x = self.fc(x)
+
         x = x.view(batch_size, -1)  # Flatten the conv output
+        # torch.Size([2, 1600]) 8 8 25
         x = self.fc2(x)
 
         # Reshape to (batch_size, frames, 1, h, w)
@@ -375,24 +376,24 @@ class CompactSignalEncoder2(nn.Module):
 
 
 class ImageReduction(nn.Module):
-    def __init__(self, input_dim=4):
+    def __init__(self, input_dim=5):
         super(ImageReduction, self).__init__()
         self.conv = nn.Conv2d(in_channels=input_dim, out_channels=1, kernel_size=1)
 
     def forward(self, x):
-        batch_size, frames, channels, signal_data = x.shape
-
+        batch_size, frames, channels, width, height = x.shape
+        # print(x.shape)
         # Reshape for Conv1D: (batch_size * frames, channels, signal_data)
-        x = x.view(batch_size * frames, channels, signal_data)
-
+        x = x.view(batch_size * channels, frames, width, height)
+        # torch.Size([10, 4, 64, 64])
         return self.conv(x)
 
 
 class CompactImageReduction(nn.Module):
     def __init__(self, input_dim=4, target_h=1, target_w=1, n_input_frames=5, frame_step=2):
         super(CompactImageReduction, self).__init__()
-        self.conv = nn.Conv2d(in_channels=input_dim, out_channels=1, kernel_size=1)
-        self.fc2 = nn.Linear(n_input_frames * target_h * target_w, target_h * target_w)
+        self.conv = nn.Conv2d(in_channels=n_input_frames, out_channels=1, kernel_size=1)
+        # self.fc2 = nn.Linear(n_input_frames * target_h * target_w, target_h * target_w)
 
         self.target_h = target_h
         self.target_w = target_w
@@ -402,11 +403,12 @@ class CompactImageReduction(nn.Module):
         batch_size, frames, channels, width, height = x.shape
 
         # Reshape for Conv1D: (batch_size * frames, channels, signal_data)
-        x = x.view(batch_size * frames, channels, width, height)
+
+        x = x.view(batch_size * channels, frames, width, height)
         x = self.conv(x)
         x = x.view(batch_size, -1)
-        x = self.fc2(x)
-        x = x.view(batch_size, 1, 1, self.target_h, self.target_w)
+        # x = self.fc2(x)
+        x = x.view(batch_size, 1, channels, self.target_h, self.target_w)
 
         return x
 
