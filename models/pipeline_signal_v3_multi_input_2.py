@@ -479,7 +479,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         signal_initial_latent = signal_encoder3(signal_values_reshaped_input)
         signal_initial_latent = signal_initial_latent.repeat(1, num_frames, 1, 1,
                                                              1).to(dtype)
-        signal_latent = torch.cat([signal_latent] * 2) if do_classifier_free_guidance else mask
+        signal_latent = torch.cat([signal_latent] * 2) if do_classifier_free_guidance else signal_latent
         condition_latent = torch.cat([condition_latent] * 2) if do_classifier_free_guidance else condition_latent
 
         # image_latent = torch.cat([image_latent] * 2) if do_classifier_free_guidance else image_latent

@@ -921,7 +921,7 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, img1, validation_data, out_f
                     fps=validation_data.fps,
                     motion_bucket_id=validation_data.motion_bucket_id,
                     n_input_frames=validation_data.n_input_frames,
-                    mask=None,
+                    signal_latent=None,
                     signal=signal,
                     sig1=sig1,
                     sig2=sig2,
