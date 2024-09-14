@@ -380,9 +380,6 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         noise = randn_tensor(image.shape, generator=generator, device=image.device, dtype=image.dtype)
         image = image + noise_aug_strength * noise
 
-        needs_upcasting = self.vae.dtype == torch.float16 and self.vae.config.force_upcast
-        if needs_upcasting:
-            self.vae.to(dtype=torch.float32)
         # print("image2", image.size())  # image2 torch.Size([5, 3, 64, 64])
         image_latents = self._encode_vae_image(image, device, num_videos_per_prompt, False)
         image_latents = image_latents.to(dtype)
@@ -390,10 +387,6 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         # print("image_latents", image_latents.size())
         # image_latents torch.Size([1, 10, 4, 8, 8])
         image_latents = image_pool(image_latents)
-
-        # cast back to fp16 if needed
-        if needs_upcasting:
-            self.vae.to(dtype=torch.float16)
 
         # Repeat the image latents for each frame so we can concatenate them with the noise
         # image_latents [batch, channels, height, width] ->[batch, num_frames, channels, height, width]
@@ -540,8 +533,6 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
 
         if not output_type == "latent":
             # cast back to fp16 if needed
-            if needs_upcasting:
-                self.vae.to(dtype=torch.float16)
             frames = self.decode_latents(latents, num_frames, decode_chunk_size)
             frames = svd_tensor2vid(frames, self.image_processor, output_type=output_type)
         else:

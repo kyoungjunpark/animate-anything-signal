@@ -478,8 +478,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     assert "frame_step" in batch.keys(), batch.keys()
     frame_step = batch["frame_step"][0].item()
     # print("frame_step", frame_step)
-    signal_values = torch.real(
-        batch['signal_values']).float().half()  # [B, FPS * frame_step, 512] # torch.Size([2, 50, 512])
+    signal_values = torch.real(batch['signal_values']).float().half()  # [B, FPS * frame_step, 512]
     signal_values = torch.nan_to_num(signal_values, nan=0.0)
     # print("signal_values", signal_values.size())
 
@@ -509,7 +508,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     encoder_hidden_states = encoder_hidden_states.repeat_interleave(repeats=num_frames, dim=0)
 
     signal_embeddings2 = signal_encoder2(signal_values_reshaped)
-    mask = signal_embeddings2
+    signal_latent = signal_embeddings2
     # Add noise to the latents according to the noise magnitude at each timestep
     # (this is the forward diffusion process) #[bsz, f, c, h , w]
 
@@ -524,8 +523,8 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
 
     loss = 0
     # print(mask.size(), input_latents.size(), signal_initial_latent.size())
-    # print(signal_initial_latent.size(), mask.size(), input_latents.size())
-    latent_model_input = torch.cat([signal_initial_latent, mask, input_latents], dim=2)
+    # print(signal_initial_latent.size(), signal_latent.size(), input_latents.size())
+    latent_model_input = torch.cat([signal_initial_latent, signal_latent, input_latents], dim=2)
 
     accelerator.wait_for_everyone()
     # print(input_latents.size(), c_noise.size(), encoder_hidden_states.size(), added_time_ids.size())
