@@ -507,9 +507,9 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     encoder_hidden_states = encoder_hidden_states.repeat_interleave(repeats=num_frames, dim=0)
 
     signal_embeddings2 = signal_encoder2(signal_values_reshaped)
-    signal_embeddings2 = signal_embeddings2.repeat(1, num_frames, 1, 1, 1) # condition_latent torch.Size([1, 50, 20, 8, 8])
+    # signal_embeddings2 = signal_embeddings2.repeat(1, num_frames, 1, 1, 1) # condition_latent torch.Size([1, 50, 20, 8, 8])
 
-    mask = signal_embeddings2
+    signal_latent = signal_embeddings2
     # Add noise to the latents according to the noise magnitude at each timestep
     # (this is the forward diffusion process) #[bsz, f, c, h , w]
 
@@ -523,7 +523,8 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     added_time_ids = added_time_ids.to(device)
 
     loss = 0
-    latent_model_input = torch.cat([signal_initial_latent, mask, input_latents], dim=2)
+    # print(signal_initial_latent.size(), signal_latent.size(), noisy_latents.size(), condition_latent.size())
+    latent_model_input = torch.cat([signal_initial_latent, signal_latent, input_latents], dim=2)
 
     accelerator.wait_for_everyone()
     # print(input_latents.size(), c_noise.size(), encoder_hidden_states.size(), added_time_ids.size())
@@ -920,7 +921,7 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, img1, validation_data, out_f
                     fps=validation_data.fps,
                     motion_bucket_id=validation_data.motion_bucket_id,
                     n_input_frames=validation_data.n_input_frames,
-                    mask=None,
+                    signal_latent=None,
                     signal=signal,
                     sig1=sig1,
                     sig2=sig2,
