@@ -367,10 +367,6 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         # video = video.half().to(device)
         # 3. Encode input image
         dtype = self.vae.dtype
-        # video = video.unsqueeze(0).to(device)
-        # image = video[0:n_input_frames] # .to(dtype)
-
-        # image = rearrange(image, 'b f c h w-> (b f) c h w').to(dtype)
         # print("image", image.size())  # image torch.Size([5, 3, 480, 640])
         # image_embeddings = self._encode_image(image[0], device, num_videos_per_prompt, do_classifier_free_guidance)
 
@@ -392,8 +388,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         image_latents = torch.cat([negative_image_latents, image_latents])
         condition_latent = image_latents.repeat(1, num_frames, 1, 1, 1)
 
-        image = video[:, 0:n_input_frames].to(dtype)
-        image = rearrange(image, 'b f c h w-> (b f) c h w').to(dtype)
+        image = video[0:n_input_frames]
         image = self.image_processor.preprocess(image, height=height, width=width)
         # print("image2", image.size())  # image2 torch.Size([5, 3, 64, 64])
         image_latents = self._encode_vae_image(image, device, num_videos_per_prompt, False)
@@ -401,7 +396,6 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         image_latents = rearrange(image_latents, '(b f) c h w-> b f c h w', b=batch_size).to(dtype)
         image_latents = image_pool(image_latents)
         image_latents = rearrange(image_latents, '(b f) c h w-> b c f h w', b=batch_size).to(dtype)
-        image_latents = torch.cat([negative_image_latents, image_latents])
         images_latent = image_latents.repeat(1, num_frames, 1, 1, 1)
 
         # mask = repeat(mask, '1 h w -> 2 f 1 h w', f=num_frames)

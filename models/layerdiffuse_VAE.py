@@ -376,7 +376,7 @@ class CompactSignalEncoder2(nn.Module):
 
 
 class ImageReduction(nn.Module):
-    def __init__(self, input_dim=5):
+    def __init__(self, input_dim=4):
         super(ImageReduction, self).__init__()
         self.conv = nn.Conv2d(in_channels=input_dim, out_channels=1, kernel_size=1)
 
@@ -392,7 +392,7 @@ class ImageReduction(nn.Module):
 class CompactImageReduction(nn.Module):
     def __init__(self, input_dim=4, target_h=1, target_w=1, n_input_frames=5, frame_step=2):
         super(CompactImageReduction, self).__init__()
-        self.conv = nn.Conv2d(in_channels=n_input_frames, out_channels=1, kernel_size=1)
+        self.conv = nn.Conv2d(in_channels=input_dim, out_channels=1, kernel_size=1)
         # self.fc2 = nn.Linear(n_input_frames * target_h * target_w, target_h * target_w)
 
         self.target_h = target_h
@@ -404,11 +404,11 @@ class CompactImageReduction(nn.Module):
 
         # Reshape for Conv1D: (batch_size * frames, channels, signal_data)
 
-        x = x.view(batch_size * channels, frames, width, height)
+        x = x.view(batch_size * frames, channels, width, height)
         x = self.conv(x)
         x = x.view(batch_size, -1)
         # x = self.fc2(x)
-        x = x.view(batch_size, 1, channels, self.target_h, self.target_w)
+        x = x.view(batch_size, 1, frames, self.target_h, self.target_w)
 
         return x
 
