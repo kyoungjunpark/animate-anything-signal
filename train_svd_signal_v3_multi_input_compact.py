@@ -94,7 +94,7 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
     # 25 = 4(latent/noisy) + 1(signal) // + n_input_frames(5) // 1(initial signal)
     # prev in_channels: cond(4) + noise(4) (+ mask(1))
     # ++ init_images(1) + init_signals(1) + signal(4)
-    in_channels = 8 + 2 + 4
+    in_channels = 1 + 1 + 4 + 8
     if eval:
         pipeline = MaskStableVideoDiffusionPipeline.from_pretrained(pretrained_model_path, torch_dtype=torch.float16,
                                                                     variant='fp16')
@@ -526,7 +526,8 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     added_time_ids = added_time_ids.to(device)
 
     loss = 0
-    # print(signal_initial_latent.size(), signal_latent.size(), noisy_latents.size(), condition_latent.size())
+    print(signal_initial_latent.size(), signal_latent.size(), images_latent.size(), input_latents.size())
+    # torch.Size([2, 25, 1, 64, 64]) torch.Size([2, 25, 1, 64, 64]) torch.Size([2, 25, 5, 64, 64]) torch.Size([2, 25, 8, 64, 64])
     latent_model_input = torch.cat([signal_initial_latent, signal_latent, images_latent, input_latents], dim=2)
 
     accelerator.wait_for_everyone()
@@ -723,7 +724,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("compact_svd_w_signal_v3_v2_agg_sig_rand_start_2step_5inputs")
+        accelerator.init_trackers("compact_5inputs_14channels")
         wandb.require("core")
 
     # Train!
@@ -876,8 +877,6 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, img1, validation_data, out_f
 
     # out_mask_path = os.path.splitext(out_file)[0] + "_mask.jpg"
     # Image.fromarray(np_mask).save(out_mask_path)
-    # motion_mask = pipeline.unet.config.in_channels == 9
-    # assert pipeline.unet.config.in_channels == 9
     motion_mask = True
     # prepare inital latents
     initial_latents = None
