@@ -460,7 +460,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     image_latent = vae.encode(image).latent_dist.mode() * vae.config.scaling_factor # # n_input_frames Channel
     image_latent = rearrange(image_latent, '(b f) c h w-> b f c h w', b=bsz).to(dtype)
     image_latent = image_pool(image_latent)
-    images_latent = image_latent.repeat(1, num_frames, 1, 1, 1) # condition_latent torch.Size([1, 50, 20, 8, 8])
+    images_latent = image_latent.repeat(1, num_frames, 1, 1, 1)
 
     pipeline.image_encoder.to(device, dtype=dtype)
 
@@ -526,7 +526,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     added_time_ids = added_time_ids.to(device)
 
     loss = 0
-    print(signal_initial_latent.size(), signal_latent.size(), images_latent.size(), input_latents.size())
+    # print(signal_initial_latent.size(), signal_latent.size(), images_latent.size(), input_latents.size())
     # torch.Size([2, 25, 1, 64, 64]) torch.Size([2, 25, 1, 64, 64]) torch.Size([2, 25, 5, 64, 64]) torch.Size([2, 25, 8, 64, 64])
     latent_model_input = torch.cat([signal_initial_latent, signal_latent, images_latent, input_latents], dim=2)
 

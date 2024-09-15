@@ -408,7 +408,7 @@ class CompactImageReduction(nn.Module):
         x = self.conv(x)
         x = x.view(batch_size, -1)
         x = self.fc2(x)
-        x = x.view(batch_size, 1, self.target_h, self.target_w)
+        x = x.view(batch_size, 1, 1, self.target_h, self.target_w)
 
         return x
 
