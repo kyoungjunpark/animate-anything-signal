@@ -384,7 +384,7 @@ class ImageReduction(nn.Module):
         batch_size, frames, channels, width, height = x.shape
         # print(x.shape)
         # Reshape for Conv1D: (batch_size * frames, channels, signal_data)
-        x = x.view(batch_size * channels, frames, width, height)
+        x = x.view(batch_size * frames, channels, width, height)
         # torch.Size([10, 4, 64, 64])
         return self.conv(x)
 
