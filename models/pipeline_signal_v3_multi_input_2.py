@@ -397,9 +397,6 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         image_latents = image_pool(image_latents)
         image_latents = rearrange(image_latents, '(b f) c h w-> b c f h w', b=batch_size).to(dtype)
         images_latent = image_latents.repeat(1, num_frames, 1, 1, 1)
-
-        # mask = repeat(mask, '1 h w -> 2 f 1 h w', f=num_frames)
-
         # mask = repeat(mask, '1 h w -> 2 f 1 h w', f=num_frames)
         # 5. Get Added Time IDs
         added_time_ids = self._get_add_time_ids(
@@ -418,7 +415,6 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         timesteps = self.scheduler.timesteps
 
         # 5. Prepare latent variables
-        # num_channels_latents = self.unet.config.in_channels - 5
         num_channels_latents = 4 * 2
         latents = self.prepare_latents(
             batch_size * num_videos_per_prompt,

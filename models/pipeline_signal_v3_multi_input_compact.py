@@ -496,7 +496,6 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
-                # torch.Size([2, 25, 1, 8, 8]) torch.Size([2, 25, 1, 8, 8]) torch.Size([2, 25, 5, 8, 8]) torch.Size([2, 25, 4, 8, 8])
                 # print(signal_initial_latent.size(), signal_latent.size(), latent_model_input.size(), condition_latent.size())
                 # torch.Size([2, 25, 5, 64, 64]) torch.Size([2, 25, 4, 64, 64]) torch.Size([2, 25, 2, 64, 64]) torch.Size([2, 25, 4, 64, 64])
                 latent_model_input = torch.cat([signal_initial_latent, signal_latent, images_latent, latent_model_input, condition_latent], dim=2).to(dtype)

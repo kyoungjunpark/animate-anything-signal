@@ -879,8 +879,6 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, img1, validation_data, out_f
 
     # out_mask_path = os.path.splitext(out_file)[0] + "_mask.jpg"
     # Image.fromarray(np_mask).save(out_mask_path)
-    # motion_mask = pipeline.unet.config.in_channels == 9
-    # assert pipeline.unet.config.in_channels == 9
     motion_mask = True
     # prepare inital latents
     initial_latents = None

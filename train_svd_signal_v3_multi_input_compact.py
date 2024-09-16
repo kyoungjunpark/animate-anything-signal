@@ -803,7 +803,6 @@ def main(
                 progress_bar.update(1)
                 accelerator.log({"train_loss": train_loss}, step=global_step)
                 global_step += 1
-
                 train_loss = 0.0
 
                 if global_step % checkpointing_steps == 0 and accelerator.is_main_process:
