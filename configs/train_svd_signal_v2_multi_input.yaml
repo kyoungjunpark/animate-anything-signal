@@ -18,7 +18,7 @@ output_dir: "./output/svd_signal_v2"
 # 'video_blip': The JSON file created with automatic BLIP2 captions using https://github.com/ExponentialML/Video-BLIP2-Preprocessor
 # 'video_json': a video foler and a json caption file
 # 'single_video': A single video file.mp4 and text prompt
-dataset_types: 
+dataset_types:
   #- 'single_video'
   #- 'folder'
   #- 'image'
@@ -34,17 +34,17 @@ use_offset_noise: False
 # If this is enabled, offset noise will be disabled.
 rescale_schedule: False
 
-# When True, this extends all items in all enabled datasets to the highest length. 
-# For example, if you have 200 videos and 10 images, 10 images will be duplicated to the length of 200. 
+# When True, this extends all items in all enabled datasets to the highest length.
+# For example, if you have 200 videos and 10 images, 10 images will be duplicated to the length of 200.
 extend_dataset: False
 
-# Caches the latents (Frames-Image -> VAE -> Latent) to a HDD or SDD. 
+# Caches the latents (Frames-Image -> VAE -> Latent) to a HDD or SDD.
 # The latents will be saved under your training folder, and loaded automatically for training.
 # This both saves memory and speeds up training and takes very little disk space.
 cache_latents: False
 
 # If you have cached latents set to `True` and have a directory of cached latents,
-# you can skip the caching process and load previously saved ones. 
+# you can skip the caching process and load previously saved ones.
 cached_latent_dir: null #/path/to/cached_latents
 
 # Train the text encoder for the model. LoRA Training overrides this setting.
@@ -58,7 +58,7 @@ train_text_encoder: False
 # This is an implementation based off of the original LoRA repository by Microsoft, and the default LoRA method here.
 # It works a different by using embeddings instead of the intermediate activations (Linear || Conv).
 # This means that there isn't an extra function when doing low ranking adaption.
-# It solely saves the weight differential between the initialized weights and updates. 
+# It solely saves the weight differential between the initialized weights and updates.
 
 # "cloneofsimo" or "stable_lora"
 # lora_version: "cloneofsimo"
@@ -109,7 +109,7 @@ text_encoder_lora_modules:
   - "CLIPEncoderLayer"
   #- "CLIPAttention"
 
-# The rank for LoRA training. With ModelScope, the maximum should be 1024. 
+# The rank for LoRA training. With ModelScope, the maximum should be 1024.
 # VRAM increases with higher rank, lower when decreased.
 lora_rank: 16
 # lora_rank: 8
@@ -121,7 +121,7 @@ train_data:
   width:  512
   height: 512
 
-  # This will find the closest aspect ratio to your input width and height. 
+  # This will find the closest aspect ratio to your input width and height.
   # For example, 512x512 width and height with a video of resolution 1280x720 will be resized to 512x256
   use_bucketing: False
   return_mask: True
@@ -134,14 +134,14 @@ train_data:
   # high fps, lower frame step, move slowly
   fps: 6
 
-  # For 'single_video' and 'json'. The number of frames to "step" (1,2,3,4) (frame_step=2) -> (1,3,5,7, ...).  
+  # For 'single_video' and 'json'. The number of frames to "step" (1,2,3,4) (frame_step=2) -> (1,3,5,7, ...).
   frame_step: 3
 
   n_input_frames: 10
 
   # The number of frames to sample. The higher this number, the higher the VRAM (acts similar to batch size).
   n_sample_frames: 25
-  
+
   # 'single_video'
   single_video_path: "/data/datasets/animal_kingdom/video_grounding/dataset/AADJBFXO.mp4"
 
@@ -150,13 +150,13 @@ train_data:
 
   # Fallback prompt if caption cannot be read. Enabled for 'image' and 'folder'.
   fallback_prompt: ''
-  
+
   # 'folder'
   #path: "/data2/webvid/data/videos/004151_004200"
   path: "/home/aiscuser/locomotion_video_whole_mp4/"
 
   # 'json'
-  json_path: '/home/aiscuser/animate-anything-signal/example/signal_2_4_new_vlip.json'
+  json_path: '/home/aiscuser/animate-anything-signal/example/signal_2_4_new_pos.json'
 
   # 'image'
   image_dir: '/vlp/datasets/images/coco'
@@ -164,14 +164,14 @@ train_data:
 
   video_dir: '/webvid/webvid/data/videos'
   video_json: '/webvid/webvid/data/40K.json'
-  # The prompt for all image files. Leave blank to use caption files (.txt) 
+  # The prompt for all image files. Leave blank to use caption files (.txt)
   single_img_prompt: ""
 
- 
+
 # Validation data parameters.
 validation_data:
 
-  # A custom prompt that is different from your training dataset. 
+  # A custom prompt that is different from your training dataset.
   prompt: "Test"
 
   # prompt_image: ["example/frame1.jpg", "example/frame2.jpg","example/frame3.jpg","example/frame4.jpg",
@@ -180,8 +180,7 @@ validation_data:
   # signal: ["example/frame1.pt", "example/frame2.pt","example/frame3.pt","example/frame4.pt",
   #   "example/frame5.pt","example/frame6.pt","example/frame7.pt","example/frame8.pt","example/frame9.pt",
   #   "example/frame10.pt","example/frame11.pt","example/frame12.pt","example/frame13.pt"]
-  prompt_image: ["example/frame1.mp4", "example/frame5.mp4","example/frame6.mp4", "example/frame7.mp4", "example/frame8.mp4", "example/frame9.mp4", "example/frame10.mp4", "example/frame11.mp4", "example/frame12.mp4"]
-  signal: ["example/frame1.pt", "example/frame5.pt", "example/frame6.pt", "example/frame7.pt", "example/frame8.pt", "example/frame9.pt", "example/frame10.pt", "example/frame11.pt", "example/frame12.pt"]
+  prompt_image: ["example/eval_data/frame1.mp4", "example/eval_data/frame5.mp4","example/eval_data/frame6.mp4", "example/eval_data/frame7.mp4", "example/eval_data/frame8.mp4", "example/eval_data/frame9.mp4", "example/eval_data/frame10.mp4", "example/eval_data/frame11.mp4", "example/eval_data/frame12.mp4"]
 
   # Whether or not to sample preview during training (Requires more VRAM).
   sample_preview: True
@@ -247,11 +246,11 @@ trainable_modules:
   # This is for self attetion. Activates for spatial and temporal dimensions if n_sample_frames > 1
   - "attn1"
   - ".attentions"
-  
+
   # This is for cross attention (image & text data). Activates for spatial and temporal dimensions if n_sample_frames > 1
   - "attn2"
   - "conv_in"
-  
+
   #  Convolution networks that hold temporal information. Activates for spatial and temporal dimensions if n_sample_frames > 1
   - "temp_conv"
   - "motion"
@@ -267,7 +266,7 @@ seed: 42
 mixed_precision: "fp16"
 
 # This seems to be incompatible at the moment.
-use_8bit_adam: False 
+use_8bit_adam: False
 
 # Trades VRAM usage for speed. You lose roughly 20% of training speed, but save a lot of VRAM.
 # If you need to save more VRAM, it can also be enabled for the text encoder, but reduces speed x2.

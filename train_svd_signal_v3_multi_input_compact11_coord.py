@@ -968,6 +968,9 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
         camera_data = np.load(camera_pose)
         tx_data = np.loadtxt(tx_loc)
 
+        camera_data = torch.from_numpy(camera_data).to(dtype).to(device)
+        tx_data = torch.from_numpy(tx_data).to(dtype).to(device)
+
         with torch.no_grad():
             if motion_mask:
                 # h, w = validation_data.height // pipeline.vae_scale_factor, validation_data.width // pipeline.vae_scale_factor
