@@ -760,7 +760,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("compact_5inputs_11channels_coords")
+        accelerator.init_trackers("compact_5inputs_13channels_coords")
         wandb.require("core")
 
     # Train!
@@ -928,9 +928,13 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
         T.CenterCrop([validation_data.height, validation_data.width])
     ])
 
-    for image, signal in zip(sorted(validation_data.prompt_image), sorted(validation_data.signal)):
+    for image in sorted(validation_data.prompt_image):
         # print(out_file)
         # print(image)
+        signal = image.replace(".mp4", ".pt")
+        camera_pose = image.replace(".mp4", ".npy")
+        tx_loc = image.replace(".mp4", ".txt")
+
         image_replaced = image.replace("frame", str(index) + "_frame").replace('.mp4', '.gif')
         target_file = out_file + image_replaced
         # print(out_file)
@@ -961,6 +965,9 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
         signal = torch.real(torch.load(signal, map_location="cuda:0", weights_only=True)).to(dtype).to(device)
         signal = signal * 1e3
 
+        camera_data = np.load(camera_pose)
+        tx_data = np.loadtxt(tx_loc)
+
         with torch.no_grad():
             if motion_mask:
                 # h, w = validation_data.height // pipeline.vae_scale_factor, validation_data.width // pipeline.vae_scale_factor
@@ -980,8 +987,8 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
                     n_input_frames=validation_data.n_input_frames,
                     signal_latent=None,
                     signal=signal,
-                    camera_pose=signal,
-                    tx_pos=signal,
+                    camera_pose=camera_data,
+                    tx_pos=tx_data,
                     sig1=sig1,
                     sig2=sig2,
                     sig3=sig3,
