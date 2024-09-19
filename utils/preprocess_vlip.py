@@ -69,12 +69,10 @@ class PreProcessVideos:
     # Video dict for individual videos.
     # {base_config: data -> [{video_path, num_frames, data}]}
     def build_video_config(self, video_path: str, signal_path: str, num_frames: int):
-        signal_path = video_path.replace("output.mp4", "channels.pt")
-
         return {
             "video_path": video_path,
             "camera_pose_path": video_path.replace("output.mp4", "camera_pose.npy"),
-            "tx_path": video_path.replace("channels.pt", "tx.txt"),
+            "tx_path": signal_path.replace("channels.pt", "tx.txt"),
             "signal_path": signal_path,
             "num_frames": num_frames,
             "data": []

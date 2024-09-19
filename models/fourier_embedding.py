@@ -6,14 +6,21 @@ import numpy as np
 from einops import repeat
 
 
-class FourierEmbedder():
-    def __init__(self, num_freqs=64, target_h=1, target_w=1, temperature=100):
+class FourierEmbedder(nn.Module):
+    def __init__(self, num_freqs=8, output_dim=48, target_h=1, target_w=1, temperature=100):
+        super(FourierEmbedder, self).__init__()
+        # fourier_freqs*2*6: fourier_embedder's output shape (2 is sin&cos, 6 is xyzxyz)
+
         self.num_freqs = num_freqs
         self.temperature = temperature
+        self.target_w = target_w
+        self.target_h = target_h
         # self.freq_bands = temperature ** (torch.arange(num_freqs) / num_freqs)
+        self.fc2 = nn.Linear(output_dim, self.target_w * self.target_h)
 
         max_freq = 1/10
         self.freq_bands = 2. ** torch.linspace(0., max_freq, steps=num_freqs)
+        # torch.Size([2, 4, 64]) torch.Size([2, 48])
 
     def __call__(self, x, cat_dim=-1):
         "x: arbitrary shape of tensor. dim: cat dim"
@@ -21,7 +28,10 @@ class FourierEmbedder():
         for freq in self.freq_bands:
             out.append(torch.sin(freq * x))
             out.append(torch.cos(freq * x))
-        return torch.cat(out, cat_dim)
+        x = torch.cat(out, cat_dim)
+        x = x.view(x.size(0), -1)  # [2, 5, 3, 64, 64]
+        x = self.fc2(x)
+        return x.view(x.size(0), 1, 1, self.target_h, self.target_w)
 
 
 def make_beta_schedule(schedule, n_timestep, linear_start=1e-4, linear_end=2e-2, cosine_s=8e-3):

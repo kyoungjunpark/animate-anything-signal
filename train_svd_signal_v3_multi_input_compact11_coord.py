@@ -54,7 +54,7 @@ import imageio
 import wandb
 # from models.unet_3d_condition import UNet3DConditionModel
 
-from models.pipeline_signal_v3_multi_input_compact import MaskStableVideoDiffusionPipeline
+from models.pipeline_signal_v3_multi_input_compact_coord import MaskStableVideoDiffusionPipeline
 
 decord.bridge.set_bridge('torch')
 
@@ -96,7 +96,7 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
     # 25 = 4(latent/noisy) + 1(signal) // + n_input_frames(5) // 1(initial signal)
     # prev in_channels: cond(4) + noise(4) (+ mask(1))
     # ++ init_images(1) + init_signals(1) + signal(4)
-    in_channels = 1 + 1 + 1 + 8
+    in_channels = 1 + 1 + 1 + 8 + 2
     if eval:
         pipeline = MaskStableVideoDiffusionPipeline.from_pretrained(pretrained_model_path, torch_dtype=torch.float16,
                                                                     variant='fp16')
@@ -139,14 +139,15 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
     # Embed specific AP's location as bounding box
     # x_min, y_min, z_min, x_max, y_max, z_max
     # fourier_freqs*2*6: fourier_embedder's output shape (2 is sin&cos, 6 is xyzxyz)
-
+    # 3 x 8 x 2 = 48
+    # 4 x 8 x 2 = 64
     fourier_freqs = 8
-    camera_fourier_embedder = FourierEmbedder(num_freqs=fourier_freqs, temperature=2, target_h=width // 8, target_w=height // 8)
-    tx_fourier_embedder = FourierEmbedder(num_freqs=fourier_freqs, temperature=2, target_h=width // 8, target_w=height // 8)
+    camera_fourier_embedder = FourierEmbedder(num_freqs=fourier_freqs, output_dim=4*4*fourier_freqs*2, temperature=2, target_h=width // 8, target_w=height // 8)
+    tx_fourier_embedder = FourierEmbedder(num_freqs=fourier_freqs, output_dim=3*fourier_freqs*2, temperature=2, target_h=width // 8, target_w=height // 8)
 
     return pipeline, None, pipeline.feature_extractor, pipeline.scheduler, pipeline.image_processor, \
            pipeline.image_encoder, pipeline.vae, pipeline.unet, signal_encoder, signal_encoder2, signal_encoder3,\
-           image_encoder, camera_fourier_embedder, tx_fourier_embedder
+           camera_fourier_embedder, tx_fourier_embedder, image_encoder
 
 
 def convert_svd(pretrained_model_path, out_path):
@@ -464,6 +465,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     signal_encoder = sig1.to(latents.device).to(dtype)
     signal_encoder2 = sig2.to(latents.device).to(dtype)
     signal_encoder3 = sig3.to(latents.device).to(dtype)
+
     camera_fourier = camera_fourier.to(latents.device).to(dtype)
     tx_fourier = tx_fourier.to(latents.device).to(dtype)
 
@@ -549,7 +551,8 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     camera_latent = camera_fourier(camera_pose)
     tx_latent = tx_fourier(tx_pos)
 
-    print(camera_latent.size(), tx_latent.size())
+    camera_latent = camera_latent.repeat(1, num_frames, 1, 1, 1) # condition_latent torch.Size([1, 50, 20, 8, 8])
+    tx_latent = tx_latent.repeat(1, num_frames, 1, 1, 1) # condition_latent torch.Size([1, 50, 20, 8, 8])
 
     motion_bucket_id = 127
     fps = 6
@@ -642,7 +645,8 @@ def main(
         output_dir = create_output_folders(output_dir, config)
 
     # Load scheduler, tokenizer and models. The text encoder is actually image encoder for SVD
-    pipeline, tokenizer, feature_extractor, train_scheduler, vae_processor, text_encoder, vae, unet, sig1, sig2, sig3, img1 = load_primary_models(
+    pipeline, tokenizer, feature_extractor, train_scheduler, vae_processor, text_encoder, vae, unet, sig1, sig2, \
+    sig3, camera_fourier, tx_fourier,  img1 = load_primary_models(
         pretrained_model_path, train_data.n_sample_frames, train_data.frame_step, train_data.n_input_frames, train_data.width, train_data.height)
     # Freeze any necessary models
     freeze_models([vae, unet])
@@ -750,7 +754,7 @@ def main(
     weight_dtype = is_mixed_precision(accelerator)
 
     # Move text encoders, and VAE to GPU
-    models_to_cast = [text_encoder, vae, sig1, sig2, sig3, img1]
+    models_to_cast = [text_encoder, vae, sig1, sig2, sig3, camera_fourier, tx_fourier, img1]
     cast_to_gpu_and_type(models_to_cast, accelerator.device, weight_dtype)
 
     # We need to initialize the trackers we use, and also store our configuration.
@@ -811,10 +815,12 @@ def main(
                 continue
 
             with accelerator.accumulate(unet), accelerator.accumulate(sig1), accelerator.accumulate(
-                    sig2), accelerator.accumulate(sig3), accelerator.accumulate(img1):
+                    sig2), accelerator.accumulate(sig3), accelerator.accumulate(camera_fourier), \
+                    accelerator.accumulate(tx_fourier), accelerator.accumulate(img1):
                 with accelerator.autocast():
                     loss = finetune_unet(accelerator, pipeline, batch, use_offset_noise,
-                                         rescale_schedule, offset_noise_strength, unet, sig1, sig2, sig3, img1,
+                                         rescale_schedule, offset_noise_strength, unet, sig1, sig2, sig3, camera_fourier,
+                                         tx_fourier, img1,
                                          train_data.n_input_frames, motion_mask)
                 device = loss.device
                 # Gather the losses across all processes for logging (if we use distributed training).
@@ -848,6 +854,8 @@ def main(
                         accelerator.unwrap_model(sig1),
                         accelerator.unwrap_model(sig2),
                         accelerator.unwrap_model(sig3),
+                        accelerator.unwrap_model(camera_fourier),
+                        accelerator.unwrap_model(tx_fourier),
                         accelerator.unwrap_model(img1),
                         output_dir,
                         is_checkpoint=True,
@@ -860,7 +868,7 @@ def main(
                         curr_dataset_name = batch['dataset'][0]
                         save_filename = f"{global_step}_dataset-{curr_dataset_name}"
                         out_file = f"{output_dir}/samples/"
-                        eval(pipeline, vae_processor, sig1, sig2, sig3, img1, validation_data, out_file, global_step)
+                        eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, validation_data, out_file, global_step)
                         logger.info(f"Saved a new sample to {out_file}")
 
             logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
@@ -883,6 +891,9 @@ def main(
             accelerator.unwrap_model(sig1),
             accelerator.unwrap_model(sig2),
             accelerator.unwrap_model(sig3),
+            accelerator.unwrap_model(camera_fourier),
+            accelerator.unwrap_model(tx_fourier),
+
             accelerator.unwrap_model(img1),
 
             output_dir,
@@ -892,7 +903,7 @@ def main(
     accelerator.end_training()
 
 
-def eval(pipeline, vae_processor, sig1, sig2, sig3, img1, validation_data, out_file, index, forward_t=25, preview=True):
+def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, validation_data, out_file, index, forward_t=25, preview=True):
     vae = pipeline.vae
     device = vae.device
     dtype = vae.dtype
@@ -969,9 +980,13 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, img1, validation_data, out_f
                     n_input_frames=validation_data.n_input_frames,
                     signal_latent=None,
                     signal=signal,
+                    camera_pose=signal,
+                    tx_pos=signal,
                     sig1=sig1,
                     sig2=sig2,
                     sig3=sig3,
+                    camera_fourier=camera_fourier,
+                    tx_fourier=tx_fourier,
                     img1=img1,
                 ).frames[0]
             else:
