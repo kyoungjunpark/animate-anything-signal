@@ -132,7 +132,7 @@ def get_frame_signal_batch(signal_path, max_frames, sample_fps, vr, transform):
     return video, partial_channels
 
 
-def get_frame_agg_signal_batch(signal_path, max_frames, sample_fps, vr, transform):
+def get_frame_agg_signal_batch(signal_path, tx_path, camera_pose_path, max_frames, sample_fps, vr, transform):
     native_fps = vr.get_avg_fps()
     max_range = len(vr)
     frame_step = max(1, round(native_fps / sample_fps))
@@ -209,8 +209,11 @@ def get_frame_agg_signal_batch(signal_path, max_frames, sample_fps, vr, transfor
 
     # print(partial_channels.size()) # 75, 512
 
+    camera_pose = np.load(camera_pose_path)
+    tx_pos = np.loadtxt(tx_path)
+
     # partial_channels = np.array(0)
-    return video, partial_channels, frame_step
+    return video, partial_channels, camera_pose, tx_pos, frame_step
 
 
 def process_video(vid_path, use_bucketing, w, h, get_frame_buckets, get_frame_batch):
@@ -421,6 +424,8 @@ class VideoBLIPDataset_V2(Dataset):
             json_data=None,
             vid_data_key: str = "video_path",
             sig_data_key: str = "signal_path",
+            tx_pos_key: str = "tx_path",
+            camera_pose_key: str = "camera_pose_path",
             preprocessed: bool = False,
             use_bucketing: bool = False,
             motion_threshold=50,
@@ -433,6 +438,8 @@ class VideoBLIPDataset_V2(Dataset):
 
         self.vid_data_key = vid_data_key
         self.sig_data_key = sig_data_key
+        self.tx_pos_key = tx_pos_key
+        self.camera_pose_key = camera_pose_key
 
         self.train_data = self.load_from_json(json_path, json_data)
         self.motion_threshold = motion_threshold
@@ -443,6 +450,7 @@ class VideoBLIPDataset_V2(Dataset):
         self.sample_start_idx = sample_start_idx
         self.fps = fps
         self.n_input_frames = n_input_frames
+
 
         self.transform = T.Compose([
             # T.RandomResizedCrop(size=(height, width), scale=(0.8, 1.0), ratio=(width/height, width/height), antialias=False)
@@ -468,6 +476,8 @@ class VideoBLIPDataset_V2(Dataset):
         extended_data.append({
             self.vid_data_key: data[self.vid_data_key],
             self.sig_data_key: data[self.sig_data_key],
+            self.tx_pos_key: data[self.tx_pos_key],
+            self.camera_pose_key: data[self.camera_pose_key],
             'frame_index': nested_data['frame_index'],
             'prompt': nested_data['prompt'],
             'clip_path': clip_path
@@ -512,7 +522,8 @@ class VideoBLIPDataset_V2(Dataset):
 
         vr = decord.VideoReader(clip_path)
 
-        video, signal, frame_step = get_frame_agg_signal_batch(vid_data[self.sig_data_key], self.n_sample_frames,
+        video, signal, camera_pose, tx_pos, frame_step = get_frame_agg_signal_batch(vid_data[self.sig_data_key], vid_data[self.tx_pos_key],
+                                                               vid_data[self.camera_pose_key], self.n_sample_frames,
                                                                self.fps, vr, self.transform)
         # video = get_frame_batch(self.n_sample_frames, self.fps, vr, self.transform)
 
@@ -523,6 +534,8 @@ class VideoBLIPDataset_V2(Dataset):
         example = {
             "pixel_values": normalize_input(video),
             "signal_values": signal,
+            "camera_pose": camera_pose,
+            "tx_pos": tx_pos,
             "prompt_ids": prompt_ids,
             "text_prompt": prompt,
             "frame_step": frame_step,

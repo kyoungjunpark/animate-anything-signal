@@ -69,8 +69,12 @@ class PreProcessVideos:
     # Video dict for individual videos.
     # {base_config: data -> [{video_path, num_frames, data}]}
     def build_video_config(self, video_path: str, signal_path: str, num_frames: int):
+        signal_path = video_path.replace("output.mp4", "channels.pt")
+
         return {
             "video_path": video_path,
+            "camera_pose_path": video_path.replace("output.mp4", "camera_pose.npy"),
+            "tx_path": video_path.replace("channels.pt", "tx.txt"),
             "signal_path": signal_path,
             "num_frames": num_frames,
             "data": []
@@ -111,7 +115,6 @@ class PreProcessVideos:
 
             # Check if current frame is the same as the first frame
             if not np.array_equal(first_frame_gray, frame_gray):
-                print("Frames are not the same.")
                 return False
 
         print("All frames are the same.")
@@ -210,9 +213,16 @@ class PreProcessVideos:
                 print(f"Frames are all same for {video_path}.")
                 continue
 
-            signal_path = video_path.replace("locomotion_video_random_000", "locomotion_signal_new_2_4").replace("output.mp4",
+            signal_path = video_path.replace("locomotion_video_000", "locomotion_signal_new_2_4").replace("output.mp4",
                                                                                                       "channels.pt")
 
+            camera_pose_path = video_path.replace("output.mp4", "camera_pose.npy")
+
+            """
+            if np.load(camera_pose_path) == np.array([]):
+                print(f"No camera_pose_path {camera_pose_path}")
+                continue
+            """
             if not os.path.exists(signal_path):
                 print(f"No signal data {signal_path}")
                 continue
