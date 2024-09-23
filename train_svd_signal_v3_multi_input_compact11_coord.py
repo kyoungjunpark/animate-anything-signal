@@ -95,8 +95,8 @@ def create_output_folders(output_dir, config):
 def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, width, height, eval=False):
     # 25 = 4(latent/noisy) + 1(signal) // + n_input_frames(5) // 1(initial signal)
     # prev in_channels: cond(4) + noise(4) (+ mask(1))
-    # ++ init_images(1) + init_signals(1) + signal(4)
-    in_channels = 1 + 1 + 1 + 8 + 2
+    # ++ init_images(1) + init_signals(1) + signal(1) + pos(1)
+    in_channels = 1 + 1 + 1 + 8 + 1
     if eval:
         pipeline = MaskStableVideoDiffusionPipeline.from_pretrained(pretrained_model_path, torch_dtype=torch.float16,
                                                                     variant='fp16')
@@ -145,8 +145,8 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
     # 3 x 8 x 2 = 48
     # 4 x 8 x 2 = 64
     fourier_freqs = 8
-    camera_fourier_embedder = FourierEmbedder(num_freqs=fourier_freqs, output_dim=4*4*fourier_freqs*2, temperature=2, target_h=width // 8, target_w=height // 8)
-    tx_fourier_embedder = FourierEmbedder(num_freqs=fourier_freqs, output_dim=3*fourier_freqs*2, temperature=2, target_h=width // 8, target_w=height // 8)
+    camera_fourier_embedder = FourierEmbedder(num_freqs=fourier_freqs, output_dim=4*4*fourier_freqs*2, temperature=2, target_h=width // 8 // 2, target_w=height // 8)
+    tx_fourier_embedder = FourierEmbedder(num_freqs=fourier_freqs, output_dim=3*fourier_freqs*2, temperature=2, target_h=width // 8 // 2, target_w=height // 8)
 
     return pipeline, None, pipeline.feature_extractor, pipeline.scheduler, pipeline.image_processor, \
            pipeline.image_encoder, pipeline.vae, pipeline.unet, signal_encoder, signal_encoder2, signal_encoder3,\
@@ -511,7 +511,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     # print("frame_step", frame_step)
     signal_values = torch.real(batch['signal_values']).float().half()  # [B, FPS * frame_step, 512]
     signal_values = torch.nan_to_num(signal_values, nan=0.0)
-    # signal_values = signal_values * 1e3
+    signal_values = signal_values * 1e4
 
     # signal_encoder = LatentSignalEncoder(input_dim=signal_values.size(-1) * signal_values.size(-2), output_dim=1024).to(device)
     # signal_encoder2 = LatentSignalEncoder(output_dim=input_latents.size(-1) * input_latents.size(-2)).to(device)
@@ -558,8 +558,8 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     tx_latent = tx_fourier(tx_pos)
 
     camera_latent = camera_latent.repeat(1, num_frames, 1, 1, 1) # condition_latent torch.Size([1, 50, 20, 8, 8])
-    tx_latent = tx_latent.repeat(1, num_frames, 1, 1, 1) # condition_latent torch.Size([1, 50, 20, 8, 8])
-
+    tx_latent = tx_latent.repeat(1, num_frames, 1, 1, 1)  # condition_latent torch.Size([1, 50, 20, 8, 8])
+    pos_latent = torch.cat((camera_latent, tx_latent), dim=3)
     motion_bucket_id = 127
     fps = 6
     added_time_ids = pipeline._get_add_time_ids(fps, motion_bucket_id,
@@ -569,7 +569,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     loss = 0
     # print(signal_initial_latent.size(), signal_latent.size(), images_latent.size(), input_latents.size())
     # torch.Size([2, 25, 1, 64, 64]) torch.Size([2, 25, 1, 64, 64]) torch.Size([2, 25, 5, 64, 64]) torch.Size([2, 25, 8, 64, 64])
-    latent_model_input = torch.cat([camera_latent, tx_latent, signal_initial_latent, signal_latent, images_latent, input_latents], dim=2)
+    latent_model_input = torch.cat([pos_latent, signal_initial_latent, signal_latent, images_latent, input_latents], dim=2)
 
     accelerator.wait_for_everyone()
     # print(input_latents.size(), c_noise.size(), encoder_hidden_states.size(), added_time_ids.size())
@@ -766,7 +766,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("compact_init_10inputs_13channels_coords")
+        accelerator.init_trackers("compact_init_10inputs_12channels_coords")
         wandb.require("core")
 
     # Train!
@@ -972,11 +972,11 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
 
         signal = torch.real(torch.load(signal, map_location="cuda:0", weights_only=True)).to(dtype).to(device)
         initial_signal = torch.real(torch.load(initial_signal, map_location="cuda:0", weights_only=True)).to(dtype).to(device)
-        initial_channels = initial_channels.unsqueeze(0)  # Now shape is (1, 512)
+        initial_channels = initial_signal.unsqueeze(0)  # Now shape is (1, 512)
 
         result_signal = torch.cat((initial_channels, signal), dim=0)  # Result shape will be (53, 512)
 
-        # signal = signal * 1e3
+        signal = signal * 1e4
 
         camera_data = np.load(camera_pose)
         tx_data = np.loadtxt(tx_loc)
