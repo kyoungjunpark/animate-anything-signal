@@ -407,7 +407,7 @@ class CompactSignalEncoder3(nn.Module):
         # x = self.fc2(x)
 
         # Reshape to (batch_size, frames, 1, h, w)
-        x = x.view(batch_size, frames, 1, self.target_h, self.target_w)
+        x = x.view(batch_size, frames, 4, self.target_h, self.target_w)
 
         return x
 
