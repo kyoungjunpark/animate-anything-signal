@@ -96,7 +96,7 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
     # 25 = 4(latent/noisy) + 1(signal) // + n_input_frames(5) // 1(initial signal)
     # prev in_channels: cond(4) + noise(4) (+ mask(1))
     # ++ init_images(1) + init_signals(1) + signal(1) + pos(1)
-    in_channels = 1 + 1 + 1 + 8 + 5
+    in_channels = 1 + 1 + 1 + 8 + 4
     if eval:
         pipeline = MaskStableVideoDiffusionPipeline.from_pretrained(pretrained_model_path, torch_dtype=torch.float16,
                                                                     variant='fp16')
@@ -766,7 +766,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("compact_all_init_5inputs_16channels_coords")
+        accelerator.init_trackers("compact_all_init_5inputs_15channels_coords")
         wandb.require("core")
 
     # Train!

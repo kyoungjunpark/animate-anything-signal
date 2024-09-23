@@ -380,7 +380,7 @@ class CompactSignalEncoder3(nn.Module):
         super(CompactSignalEncoder3, self).__init__()
         self.conv1 = nn.Conv1d(in_channels=frame_step, out_channels=64, kernel_size=3, padding=1)
         self.conv2 = nn.Conv1d(in_channels=64, out_channels=128, kernel_size=3, padding=1)
-        self.fc = nn.Linear(128 * signal_data_dim, target_h * target_w * 1)
+        self.fc = nn.Linear(128 * signal_data_dim, target_h * target_w * 3)
         # self.fc2 = nn.Linear(fps * target_h * target_w, target_h * target_w)
 
         self.target_h = target_h
@@ -407,7 +407,7 @@ class CompactSignalEncoder3(nn.Module):
         # x = self.fc2(x)
 
         # Reshape to (batch_size, frames, 1, h, w)
-        x = x.view(batch_size, frames, 4, self.target_h, self.target_w)
+        x = x.view(batch_size, frames, 3, self.target_h, self.target_w)
 
         return x
 
