@@ -976,7 +976,7 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
 
         result_signal = torch.cat((initial_channels, signal), dim=0)  # Result shape will be (53, 512)
 
-        signal = signal * 1e4
+        result_signal = result_signal * 1e4
 
         camera_data = np.load(camera_pose)
         tx_data = np.loadtxt(tx_loc)
