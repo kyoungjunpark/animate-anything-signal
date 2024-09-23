@@ -124,6 +124,7 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
 
     # signal_encoder = LatentSignalEncoder(output_dim=encoder_hidden_dim)
     # signal_encoder = SignalEncoder(input_size=CHIRP_LEN, frame_step=2, output_size=encoder_hidden_dim)
+    image_encoder = CompactImageReduction(input_dim=4, frame_step=frame_step, n_input_frames=n_input_frames, target_h=width // 8, target_w=height // 8)
 
     # for intiial signal
     n_input_frames += 1
@@ -133,8 +134,6 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
     # Just large dim for later interpolation
     input_latents_dim1 = 100
     input_latents_dim2 = 100
-
-    image_encoder = CompactImageReduction(input_dim=4, frame_step=frame_step, n_input_frames=n_input_frames, target_h=width // 8, target_w=height // 8)
 
     # signal_encoder2 = LatentSignalEncoder(output_dim=input_latents_dim1 * input_latents_dim2)
     signal_encoder2 = CompactSignalEncoder3(signal_data_dim=CHIRP_LEN, fps=fps, frame_step=frame_step, target_h=width // 8, target_w=height // 8)
@@ -767,7 +766,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("compact_5inputs_13channels_coords")
+        accelerator.init_trackers("compact_init_10inputs_13channels_coords")
         wandb.require("core")
 
     # Train!
