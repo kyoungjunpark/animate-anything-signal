@@ -74,6 +74,7 @@ class PreProcessVideos:
             "camera_pose_path": video_path.replace("output.mp4", "camera_pose.npy"),
             "tx_path": signal_path.replace("channels.pt", "tx.txt"),
             "signal_path": signal_path,
+            "initial_signal_path": signal_path.replace("channels.pt", "initial_channels.pt"),
             "num_frames": num_frames,
             "data": []
         }
@@ -187,7 +188,7 @@ class PreProcessVideos:
 
     # Main loop for processing all videos.
     def process_videos(self):
-        self.load_blip()
+        # self.load_blip()
         config = self.build_base_config()
 
         if not os.path.exists(self.video_directory):
@@ -211,7 +212,7 @@ class PreProcessVideos:
                 print(f"Frames are all same for {video_path}.")
                 continue
 
-            signal_path = video_path.replace("locomotion_video_000", "locomotion_signal_new_2_4").replace("output.mp4",
+            signal_path = video_path.replace("locomotion_video_000", "locomotion_signal_2to6_agg").replace("output.mp4",
                                                                                                       "channels.pt")
 
             camera_pose_path = video_path.replace("output.mp4", "camera_pose.npy")

@@ -109,7 +109,7 @@ def get_frame_batch(max_frames, sample_fps, vr, transform):
     return video
 
 
-def get_frame_signal_batch(signal_path, max_frames, sample_fps, vr, transform):
+def get_frame_signal_batch(signal_path, initial_signal_path, max_frames, sample_fps, vr, transform):
     native_fps = vr.get_avg_fps()
     max_range = len(vr)
     frame_step = max(1, round(native_fps / sample_fps))
@@ -126,10 +126,15 @@ def get_frame_signal_batch(signal_path, max_frames, sample_fps, vr, transform):
 
     channels = torch.load(signal_path, map_location="cuda:0", weights_only=True)
 
+    initial_channels = torch.load(initial_signal_path, map_location="cuda:0", weights_only=True)
+
     partial_channels = channels[frame_range_indices, :]
 
+    initial_channels = initial_channels.unsqueeze(0)  # Now shape is (1, 512)
+
+    result_signal = torch.cat((initial_channels, partial_channels), dim=0)  # Result shape will be (53, 512)
     # partial_channels = np.array(0)
-    return video, partial_channels
+    return video, result_signal
 
 
 def get_frame_agg_signal_batch(signal_path, tx_path, camera_pose_path, max_frames, sample_fps, vr, transform):
@@ -242,6 +247,7 @@ class VideoBLIPDataset(Dataset):
             json_data=None,
             vid_data_key: str = "video_path",
             sig_data_key: str = "signal_path",
+            initial_sig_data_key: str = "initial_signal_path",
             preprocessed: bool = False,
             use_bucketing: bool = False,
             motion_threshold=50,
@@ -254,6 +260,7 @@ class VideoBLIPDataset(Dataset):
 
         self.vid_data_key = vid_data_key
         self.sig_data_key = sig_data_key
+        self.initial_sig_data_key = initial_sig_data_key
 
         self.train_data = self.load_from_json(json_path, json_data)
         self.motion_threshold = motion_threshold
@@ -331,7 +338,7 @@ class VideoBLIPDataset(Dataset):
 
         vr = decord.VideoReader(clip_path)
 
-        video, signal = get_frame_signal_batch(vid_data[self.sig_data_key], self.n_sample_frames, self.fps, vr,
+        video, signal = get_frame_signal_batch(vid_data[self.sig_data_key], vid_data[self.initial_sig_data_key], self.n_sample_frames, self.fps, vr,
                                                self.transform)
         # video = get_frame_batch(self.n_sample_frames, self.fps, vr, self.transform)
 

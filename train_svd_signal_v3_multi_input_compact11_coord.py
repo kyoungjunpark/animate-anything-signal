@@ -124,6 +124,10 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
 
     # signal_encoder = LatentSignalEncoder(output_dim=encoder_hidden_dim)
     # signal_encoder = SignalEncoder(input_size=CHIRP_LEN, frame_step=2, output_size=encoder_hidden_dim)
+
+    # for intiial signal
+    n_input_frames += 1
+    fps += 1
     signal_encoder = FrameToSignalNet(input_size=CHIRP_LEN, n_input_frames=n_input_frames, frame_step=frame_step, output_size=encoder_hidden_dim)
 
     # Just large dim for later interpolation
@@ -480,9 +484,12 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
 
     image = pixel_values[:, 0:n_input_frames].to(dtype)
     image = rearrange(image, 'b f c h w-> (b f) c h w').to(dtype)
+    noise_aug_strength = math.exp(random.normalvariate(mu=-3, sigma=0.5))
+    image = image + noise_aug_strength * torch.randn_like(image)
+
     image_latent = vae.encode(image).latent_dist.mode() * vae.config.scaling_factor # # n_input_frames Channel
     image_latent = rearrange(image_latent, '(b f) c h w-> b f c h w', b=bsz).to(dtype)
-    image_latent = image_pool(image_latent)
+    image_latent = image_pool(image_latent) / vae.config.scaling_factor
     images_latent = image_latent.repeat(1, num_frames, 1, 1, 1)
 
     pipeline.image_encoder.to(device, dtype=dtype)
@@ -505,7 +512,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     # print("frame_step", frame_step)
     signal_values = torch.real(batch['signal_values']).float().half()  # [B, FPS * frame_step, 512]
     signal_values = torch.nan_to_num(signal_values, nan=0.0)
-    signal_values = signal_values * 1e3
+    # signal_values = signal_values * 1e3
 
     # signal_encoder = LatentSignalEncoder(input_dim=signal_values.size(-1) * signal_values.size(-2), output_dim=1024).to(device)
     # signal_encoder2 = LatentSignalEncoder(output_dim=input_latents.size(-1) * input_latents.size(-2)).to(device)
@@ -516,7 +523,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     signal_values_reshaped = rearrange(signal_values, 'b (f c) h-> b f c h', c=frame_step)  # [B, FPS, 32]
     # print("0.5", signal_values_reshaped.size())  # torch.Size([2, 5, 3, 512])
     # print("signal_values_reshaped", signal_values_reshaped.size())
-    signal_values_reshaped_input = signal_values_reshaped[:, 0:n_input_frames]
+    signal_values_reshaped_input = signal_values_reshaped[:, :n_input_frames+1]
 
     signal_embeddings = signal_encoder(signal_values_reshaped_input)
     signal_embeddings = signal_embeddings.reshape(bsz, 1, -1)
@@ -932,6 +939,8 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
         # print(out_file)
         # print(image)
         signal = image.replace(".mp4", ".pt")
+        initial_signal = signal.replace(".pt", "_init.pt")
+
         camera_pose = image.replace(".mp4", ".npy")
         tx_loc = image.replace(".mp4", ".txt")
 
@@ -963,7 +972,12 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
         # video = normalize_input(video)
 
         signal = torch.real(torch.load(signal, map_location="cuda:0", weights_only=True)).to(dtype).to(device)
-        signal = signal * 1e3
+        initial_signal = torch.real(torch.load(initial_signal, map_location="cuda:0", weights_only=True)).to(dtype).to(device)
+        initial_channels = initial_channels.unsqueeze(0)  # Now shape is (1, 512)
+
+        result_signal = torch.cat((initial_channels, signal), dim=0)  # Result shape will be (53, 512)
+
+        # signal = signal * 1e3
 
         camera_data = np.load(camera_pose)
         tx_data = np.loadtxt(tx_loc)
@@ -989,7 +1003,7 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
                     motion_bucket_id=validation_data.motion_bucket_id,
                     n_input_frames=validation_data.n_input_frames,
                     signal_latent=None,
-                    signal=signal,
+                    signal=result_signal,
                     camera_pose=camera_data,
                     tx_pos=tx_data,
                     sig1=sig1,
