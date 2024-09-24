@@ -189,6 +189,43 @@ class CompactSignalTransformer(nn.Module):
         return x
 
 
+class CompactSignalTransformer2(nn.Module):
+    def __init__(self, input_size=512, target_h=1, target_w=1, frame_step=2, n_input_frames=5, output_dim=4):
+        super(CompactSignalTransformer2, self).__init__()
+        self.conv1 = nn.Conv1d(in_channels=frame_step, out_channels=128, kernel_size=1, padding=1)
+        self.conv2 = nn.Conv1d(in_channels=128, out_channels=256, kernel_size=1, padding=1)
+        self.fc = nn.Linear(256 * input_size, target_h * target_w * 3)
+        # self.fc2 = nn.Linear(fps * target_h * target_w, target_h * target_w)
+
+        self.target_h = target_h
+        self.target_w = target_w
+
+    def forward(self, x):
+        batch_size, frames, channels, signal_data = x.shape
+
+        # Reshape for Conv1D: (batch_size * frames, channels, signal_data)
+        x = x.view(batch_size * frames, channels, signal_data)
+
+        # Apply Conv1D layers
+        x = self.conv1(x)
+        x = torch.relu(x)
+        x = self.conv2(x)
+        x = torch.relu(x)
+
+        # Flatten and apply the fully connected layer to get the desired h and w
+        x = x.view(batch_size * frames, -1)  # Flatten the conv output
+        x = self.fc(x)
+
+        # x = x.view(batch_size, -1)  # Flatten the conv output
+        # torch.Size([2, 1600]) 8 8 25
+        # x = self.fc2(x)
+
+        # Reshape to (batch_size, frames, 1, h, w)
+        x = x.view(batch_size, frames, 1, self.target_h, self.target_w)
+
+        return x
+
+
 class TransformNet(nn.Module):
     def __init__(self, input_size=512, output_size=512, n_input_frames=5, frame_step=2):
         super(TransformNet, self).__init__()
@@ -212,8 +249,8 @@ class FrameToSignalNet(nn.Module):
         self.flatten = nn.Flatten()
 
         # Fully connected layer to reduce [batch, 7680] to [batch, 1024]
-        self.fc1 = nn.Linear(n_input_frames * frame_step * input_size, 128)  # Hidden layer with 128 units
-        self.fc2 = nn.Linear(128, output_size)  # Output layer to map to 512
+        self.fc1 = nn.Linear(n_input_frames * frame_step * input_size, 512)  # Hidden layer with 128 units
+        self.fc2 = nn.Linear(512, output_size)  # Output layer to map to 512
 
         # Optionally, add a ReLU activation and a reshaping layer
         self.relu = nn.ReLU()
@@ -378,9 +415,9 @@ class CompactSignalEncoder2(nn.Module):
 class CompactSignalEncoder3(nn.Module):
     def __init__(self, signal_data_dim=512, target_h=1, target_w=1, fps=25, frame_step=2):
         super(CompactSignalEncoder3, self).__init__()
-        self.conv1 = nn.Conv1d(in_channels=frame_step, out_channels=64, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv1d(in_channels=64, out_channels=128, kernel_size=3, padding=1)
-        self.fc = nn.Linear(128 * signal_data_dim, target_h * target_w * 3)
+        self.conv1 = nn.Conv1d(in_channels=frame_step, out_channels=128, kernel_size=1, padding=1)
+        self.conv2 = nn.Conv1d(in_channels=128, out_channels=256, kernel_size=1, padding=1)
+        self.fc = nn.Linear(256 * signal_data_dim, target_h * target_w * 3)
         # self.fc2 = nn.Linear(fps * target_h * target_w, target_h * target_w)
 
         self.target_h = target_h

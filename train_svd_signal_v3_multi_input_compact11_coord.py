@@ -46,7 +46,7 @@ from diffusers.pipelines.stable_video_diffusion.pipeline_stable_video_diffusion 
 
 from models.layerdiffuse_VAE import LatentSignalEncoder, SignalEncoder, SignalEncoder2, ImageReduction, \
     MultiSignalEncoder, TransformNet, FrameToSignalNet, SignalTransformer, CompactSignalEncoder2, \
-    CompactSignalTransformer, CompactImageReduction, CompactSignalEncoder3
+    CompactSignalTransformer2, CompactImageReduction, CompactSignalEncoder3
 # from models.pipeline_stable_video_diffusion import StableVideoDiffusionPipeline
 from utils.dataset import get_train_dataset, extend_datasets, normalize_input
 from einops import rearrange, repeat
@@ -140,7 +140,7 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
     # signal_encoder2 = LatentSignalEncoder(output_dim=input_latents_dim1 * input_latents_dim2)
     signal_encoder2 = CompactSignalEncoder3(signal_data_dim=CHIRP_LEN, fps=fps, frame_step=frame_step,
                                             target_h=width // 8, target_w=height // 8)
-    signal_encoder3 = CompactSignalTransformer(input_size=CHIRP_LEN, frame_step=frame_step,
+    signal_encoder3 = CompactSignalTransformer2(input_size=CHIRP_LEN, frame_step=frame_step,
                                                n_input_frames=n_input_frames, target_h=width // 8, target_w=height // 8)
 
     # Embed specific AP's location as bounding box
@@ -777,7 +777,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("compact_all_init_5inputs_log_15channels_coords")
+        accelerator.init_trackers("compact_init_10inputs_log_15channels_coords")
         wandb.require("core")
 
     # Train!
