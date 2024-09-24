@@ -204,7 +204,8 @@ validation_data:
   decode_chunk_size: 8
 
 # Learning rate for AdamW
-learning_rate: 5.0e-06
+# learning_rate: 5.0e-06
+learning_rate: 3.0e-05
 
 # Weight decay. Higher = more regularization. Lower = closer to dataset.
 adam_weight_decay: 0

@@ -393,7 +393,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         image_latents = torch.cat([negative_image_latents, image_latents])
         condition_latent = image_latents.repeat(1, num_frames, 1, 1, 1)
 
-        image = video[0:n_input_frames]
+        image = video[1:n_input_frames]
         image = self.image_processor.preprocess(image, height=height, width=width)
         # print("image2", image.size())  # image2 torch.Size([5, 3, 64, 64])
         image_latents = self._encode_vae_image(image, device, num_videos_per_prompt, False)
