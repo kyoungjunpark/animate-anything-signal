@@ -442,7 +442,6 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         # signal
         signal_values = signal.float().half()  # [FPS, 512]
 
-        signal_values = torch.nan_to_num(signal_values, nan=0.0)
         target_fps = 25
 
         max_frame = signal_values.size(0)
@@ -453,7 +452,10 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         frame_range = range(0, max_frame, frame_step)
 
         frame_range_indices = list(frame_range)[1:1 + num_frames]
+        print(frame_range, frame_range_indices)
 
+        frame_range_indices = [x + 1 for x in frame_range_indices]
+        print(frame_range_indices)
         # print(signal_values.unsqueeze(0).size())
         signal_values = load_channel(signal_values, frame_step, frame_range_indices)
         signal_values = signal_values.unsqueeze(0)

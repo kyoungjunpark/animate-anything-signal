@@ -46,8 +46,9 @@ from diffusers.pipelines.stable_video_diffusion.pipeline_stable_video_diffusion 
 
 from models.layerdiffuse_VAE import LatentSignalEncoder, SignalEncoder, SignalEncoder2, ImageReduction, \
     MultiSignalEncoder, TransformNet, FrameToSignalNet, SignalTransformer, CompactSignalEncoder2, \
-    CompactSignalTransformer2, CompactImageReduction, CompactSignalEncoder3
+    CompactSignalTransformer2, CompactImageReduction, CompactSignalEncoder3_2
 # from models.pipeline_stable_video_diffusion import StableVideoDiffusionPipeline
+from utils.common import log_scale_tensor
 from utils.dataset import get_train_dataset, extend_datasets, normalize_input
 from einops import rearrange, repeat
 import imageio
@@ -138,7 +139,7 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
     input_latents_dim2 = 100
 
     # signal_encoder2 = LatentSignalEncoder(output_dim=input_latents_dim1 * input_latents_dim2)
-    signal_encoder2 = CompactSignalEncoder3(signal_data_dim=CHIRP_LEN, fps=fps, frame_step=frame_step,
+    signal_encoder2 = CompactSignalEncoder3_2(signal_data_dim=CHIRP_LEN, fps=fps, frame_step=frame_step,
                                             target_h=width // 8, target_w=height // 8)
     signal_encoder3 = CompactSignalTransformer2(input_size=CHIRP_LEN, frame_step=frame_step,
                                                n_input_frames=n_input_frames, target_h=width // 8, target_w=height // 8)
@@ -517,9 +518,9 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     frame_step = batch["frame_step"][0].item()
     # print("frame_step", frame_step)
     signal_values = torch.real(batch['signal_values']).float().half()  # [B, FPS * frame_step, 512]
-    signal_values = torch.nan_to_num(signal_values, nan=0.0)
     # signal_values = signal_values * 1e4
-    signal_values = torch.log10(signal_values)
+    signal_values = log_scale_tensor(torch.abs(signal_values) * 1e5)
+    signal_values = torch.nan_to_num(signal_values, nan=0.0)
 
     # signal_encoder = LatentSignalEncoder(input_dim=signal_values.size(-1) * signal_values.size(-2), output_dim=1024).to(device)
     # signal_encoder2 = LatentSignalEncoder(output_dim=input_latents.size(-1) * input_latents.size(-2)).to(device)
@@ -540,13 +541,14 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     if random.random() < 0.15:
         encoder_hidden_states = uncond_hidden_states
 
-    # here for intiial signal embedding
+    # here for initial signal embedding
     signal_initial_latent = signal_encoder3(signal_values_reshaped_input)
     signal_initial_latent = signal_initial_latent.repeat(1, num_frames, 1, 1,
                                                          1)  # condition_latent torch.Size([1, 50, 20, 8, 8])
 
     encoder_hidden_states = encoder_hidden_states.repeat_interleave(repeats=num_frames, dim=0)
 
+    # Whole signal embedding
     signal_embeddings2 = signal_encoder2(signal_values_reshaped)
     # signal_embeddings2 = signal_embeddings2.repeat(1, num_frames, 1, 1, 1) # condition_latent torch.Size([1, 50, 20, 8, 8])
 
@@ -779,6 +781,7 @@ def main(
     if accelerator.is_main_process:
         accelerator.init_trackers("compact_init_10inputs_log_15channels_coords")
         wandb.require("core")
+        wandb.login(key="a94ace7392048e560ce6962a468101c6f0158b55")
 
     # Train!
     total_batch_size = train_batch_size * accelerator.num_processes * gradient_accumulation_steps
@@ -992,7 +995,8 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
         result_signal = torch.cat((initial_channels, signal), dim=0)  # Result shape will be (53, 512)
 
         # result_signal = result_signal * 1e4
-        result_signal = torch.log10(result_signal)
+        result_signal = log_scale_tensor(torch.abs(result_signal) * 1e5)
+        result_signal = torch.nan_to_num(result_signal, nan=0.0)
 
         camera_data = np.load(camera_pose)
         tx_data = np.loadtxt(tx_loc)
