@@ -97,7 +97,7 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
     # 25 = 4(latent/noisy) + 1(signal) // + n_input_frames(5) // 1(initial signal)
     # prev in_channels: cond(4) + noise(4) (+ mask(1))
     # ++ init_images(1) + init_signals(1) + signal(1) + pos(1)
-    in_channels = 1 + 1 + 1 + 8 + 4
+    in_channels = 1 + 1 + 1 + 8 + 1
     if eval:
         pipeline = MaskStableVideoDiffusionPipeline.from_pretrained(pretrained_model_path, torch_dtype=torch.float16,
                                                                     variant='fp16')
@@ -151,9 +151,9 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
     # 4 x 8 x 2 = 64
     fourier_freqs = 8
     camera_fourier_embedder = FourierEmbedder(num_freqs=fourier_freqs, output_dim=4 * 4 * fourier_freqs * 2,
-                                              temperature=2, target_h=width // 8, target_w=height // 8)
+                                              temperature=2, target_h=width // 16, target_w=height // 16)
     tx_fourier_embedder = FourierEmbedder(num_freqs=fourier_freqs, output_dim=3 * fourier_freqs * 2, temperature=2,
-                                          target_h=width // 8, target_w=height // 8)
+                                          target_h=width // 16, target_w=height // 16)
 
     return pipeline, None, pipeline.feature_extractor, pipeline.scheduler, pipeline.image_processor, \
            pipeline.image_encoder, pipeline.vae, pipeline.unet, signal_encoder, signal_encoder2, signal_encoder3, \
@@ -570,8 +570,11 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     camera_latent = camera_fourier(camera_pose)
     tx_latent = tx_fourier(tx_pos)
 
-    camera_latent = camera_latent.repeat(1, num_frames, 1, 1, 1)  # condition_latent torch.Size([1, 50, 20, 8, 8])
-    tx_latent = tx_latent.repeat(1, num_frames, 1, 1, 1)  # condition_latent torch.Size([1, 50, 20, 8, 8])
+    merged = torch.cat((camera_latent, tx_latent), dim=-1)
+    pos_latent = torch.cat((merged, merged), dim=-2)
+    pos_latent = pos_latent.repeat(1, num_frames, 1, 1, 1)  # condition_latent torch.Size([1, 50, 20, 8, 8])
+
+    # tx_latent = tx_latent.repeat(1, num_frames, 1, 1, 1)  # condition_latent torch.Size([1, 50, 20, 8, 8])
     # pos_latent = torch.cat((camera_latent, tx_latent), dim=3)
     motion_bucket_id = 127
     fps = 6
@@ -583,7 +586,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     # print(signal_initial_latent.size(), signal_latent.size(), images_latent.size(), input_latents.size())
     # torch.Size([2, 25, 1, 64, 64]) torch.Size([2, 25, 1, 64, 64]) torch.Size([2, 25, 5, 64, 64]) torch.Size([2, 25, 8, 64, 64])
     latent_model_input = torch.cat(
-        [camera_latent, tx_latent, signal_initial_latent, signal_latent, images_latent, input_latents], dim=2)
+        [pos_latent, signal_initial_latent, signal_latent, images_latent, input_latents], dim=2)
 
     accelerator.wait_for_everyone()
     # print(input_latents.size(), c_noise.size(), encoder_hidden_states.size(), added_time_ids.size())
@@ -782,8 +785,8 @@ def main(
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
         accelerator.init_trackers("compact_init_10inputs_2log_15channels_coords")
-        wandb.require("core")
         wandb.login(key="a94ace7392048e560ce6962a468101c6f0158b55")
+        wandb.require("core")
 
     # Train!
     total_batch_size = train_batch_size * accelerator.num_processes * gradient_accumulation_steps

@@ -483,10 +483,11 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
 
         camera_latent = camera_fourier(camera_pose)
         tx_latent = tx_fourier(tx_pos)
+        merged = torch.cat((camera_latent, tx_latent), dim=-1)
+        pos_latent = torch.cat((merged, merged), dim=-2)
+        pos_latent = pos_latent.repeat(1, num_frames, 1, 1, 1)  # condition_latent torch.Size([1, 50, 20, 8, 8])
 
-        camera_latent = camera_latent.repeat(1, num_frames, 1, 1,
-                                                             1).to(dtype)
-        tx_latent = tx_latent.repeat(1, num_frames, 1, 1,
+        pos_latent = pos_latent.repeat(1, num_frames, 1, 1,
                                                              1).to(dtype)
         # pos_latent = torch.cat((camera_latent, tx_latent), dim=3)
 
@@ -502,8 +503,8 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         images_latent = torch.cat([images_latent] * 2) if do_classifier_free_guidance else images_latent
 
         # pos_latent = torch.cat([pos_latent] * 2) if do_classifier_free_guidance else pos_latent
-        camera_latent = torch.cat([camera_latent] * 2) if do_classifier_free_guidance else camera_latent
-        tx_latent = torch.cat([tx_latent] * 2) if do_classifier_free_guidance else tx_latent
+        # camera_latent = torch.cat([camera_latent] * 2) if do_classifier_free_guidance else camera_latent
+        pos_latent = torch.cat([pos_latent] * 2) if do_classifier_free_guidance else tx_latent
         encoder_hidden_states = torch.cat(
             [encoder_hidden_states] * 2) if do_classifier_free_guidance else encoder_hidden_states
 
@@ -519,7 +520,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
                 # print(signal_initial_latent.size(), signal_latent.size(), latent_model_input.size(), condition_latent.size())
                 # torch.Size([2, 25, 5, 64, 64]) torch.Size([2, 25, 4, 64, 64]) torch.Size([2, 25, 2, 64, 64]) torch.Size([2, 25, 4, 64, 64])
-                latent_model_input = torch.cat([camera_latent, tx_latent, signal_initial_latent, signal_latent, images_latent, latent_model_input, condition_latent], dim=2).to(dtype)
+                latent_model_input = torch.cat([pos_latent, signal_initial_latent, signal_latent, images_latent, latent_model_input, condition_latent], dim=2).to(dtype)
 
                 # predict the noise residual
                 noise_pred = self.unet(

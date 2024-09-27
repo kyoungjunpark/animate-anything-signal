@@ -458,7 +458,7 @@ class CompactSignalEncoder3_2(nn.Module):
         self.conv1 = nn.Conv1d(in_channels=frame_step, out_channels=128, kernel_size=1, padding=0)
         self.conv2 = nn.Conv1d(in_channels=128, out_channels=256, kernel_size=1, padding=0)
         self.fc = nn.Linear(256 * signal_data_dim, 2048)
-        self.fc2 = nn.Linear(2048, target_h * target_w * 3)
+        self.fc2 = nn.Linear(2048, target_h * target_w * 1)
 
         # self.fc2 = nn.Linear(fps * target_h * target_w, target_h * target_w)
         self.silu = nn.SiLU()
@@ -493,7 +493,7 @@ class CompactSignalEncoder3_2(nn.Module):
         # x = self.fc2(x)
 
         # Reshape to (batch_size, frames, 1, h, w)
-        x = x.view(batch_size, frames, 3, self.target_h, self.target_w)
+        x = x.view(batch_size, frames, 1, self.target_h, self.target_w)
 
         return x
 
