@@ -15,11 +15,11 @@ def log_scale_tensor(tensor):
 
     # For positive values
     positive_mask = tensor > 0
-    log_scaled_tensor[positive_mask] = torch.log10(tensor[positive_mask])
+    log_scaled_tensor[positive_mask] = torch.log2(tensor[positive_mask])
 
     # For negative values
     negative_mask = tensor < 0
-    log_scaled_tensor[negative_mask] = -torch.log10(torch.abs(tensor[negative_mask]))
+    log_scaled_tensor[negative_mask] = -torch.log2(torch.abs(tensor[negative_mask]))
 
     # Zero values remain zero
     # (No need to handle zero as `torch.zeros_like` already initializes with zeros)

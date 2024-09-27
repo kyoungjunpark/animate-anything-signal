@@ -452,10 +452,8 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         frame_range = range(0, max_frame, frame_step)
 
         frame_range_indices = list(frame_range)[1:1 + num_frames]
-        print(frame_range, frame_range_indices)
-
+        # shift  for initial signal,
         frame_range_indices = [x + 1 for x in frame_range_indices]
-        print(frame_range_indices)
         # print(signal_values.unsqueeze(0).size())
         signal_values = load_channel(signal_values, frame_step, frame_range_indices)
         signal_values = signal_values.unsqueeze(0)
