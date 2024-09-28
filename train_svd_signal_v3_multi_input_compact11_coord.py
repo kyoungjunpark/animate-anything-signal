@@ -519,7 +519,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     # print("frame_step", frame_step)
     signal_values = torch.real(batch['signal_values']).float().half()  # [B, FPS * frame_step, 512]
     # signal_values = signal_values * 1e4
-    signal_values = log_scale_tensor(torch.abs(signal_values) * 1e3)
+    # signal_values = log_scale_tensor(torch.abs(signal_values) * 1e3)
     if torch.isnan(signal_values).any():
         print(signal_values)
         signal_values = torch.nan_to_num(signal_values, nan=0.0)
@@ -784,7 +784,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("compact_init_10inputs_2log_15channels_coords")
+        accelerator.init_trackers("compact_init_10inputs_11channels_coords")
         wandb.login(key="a94ace7392048e560ce6962a468101c6f0158b55")
         wandb.require("core")
 
