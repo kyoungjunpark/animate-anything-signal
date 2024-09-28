@@ -463,7 +463,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
 
         # [B, FPS, 512] -> [B * FPS, 512]
         signal_values_reshaped = rearrange(signal_values, 'b (f c) h-> b f c h', c=frame_step)  # [B, FPS, 32]
-        signal_values_reshaped_input = signal_values_reshaped[:, 0:n_input_frames+1]
+        signal_values_reshaped_input = signal_values_reshaped[:, 0:n_input_frames]
         # print("signal_values_reshaped_input", signal_values_reshaped.size())
 
         signal_embeddings = signal_encoder(signal_values_reshaped_input)

@@ -533,7 +533,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     signal_values_reshaped = rearrange(signal_values, 'b (f c) h-> b f c h', c=frame_step)  # [B, FPS, 32]
     # print("0.5", signal_values_reshaped.size())  # torch.Size([2, 5, 3, 512])
     # print("signal_values_reshaped", signal_values_reshaped.size())
-    signal_values_reshaped_input = signal_values_reshaped[:, :n_input_frames + 1]
+    signal_values_reshaped_input = signal_values_reshaped[:, :n_input_frames]
 
     signal_embeddings = signal_encoder(signal_values_reshaped_input)
     signal_embeddings = signal_embeddings.reshape(bsz, 1, -1)
