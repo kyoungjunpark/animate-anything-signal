@@ -487,8 +487,6 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         pos_latent = torch.cat((merged, merged), dim=-2)
         pos_latent = pos_latent.repeat(1, num_frames, 1, 1, 1)  # condition_latent torch.Size([1, 50, 20, 8, 8])
 
-        pos_latent = pos_latent.repeat(1, num_frames, 1, 1,
-                                                             1).to(dtype)
         # pos_latent = torch.cat((camera_latent, tx_latent), dim=3)
 
         # here for intiial signal embedding
@@ -504,7 +502,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
 
         # pos_latent = torch.cat([pos_latent] * 2) if do_classifier_free_guidance else pos_latent
         # camera_latent = torch.cat([camera_latent] * 2) if do_classifier_free_guidance else camera_latent
-        pos_latent = torch.cat([pos_latent] * 2) if do_classifier_free_guidance else tx_latent
+        pos_latent = torch.cat([pos_latent] * 2) if do_classifier_free_guidance else pos_latent
         encoder_hidden_states = torch.cat(
             [encoder_hidden_states] * 2) if do_classifier_free_guidance else encoder_hidden_states
 
