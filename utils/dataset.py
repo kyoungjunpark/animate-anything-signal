@@ -150,6 +150,7 @@ def get_frame_agg_signal_batch(signal_path, tx_path, camera_pose_path, max_frame
     if len(frame_range) < max_frames:
         frame_range = np.linspace(0, max_range - 1, max_frames).astype(int)
     start = random.randint(0, len(frame_range) - max_frames)
+    start = 0
     # start = len(frame_range) - max_frames
     frame_range_indices = list(frame_range)[start:start + max_frames]
     frames = vr.get_batch(frame_range_indices)

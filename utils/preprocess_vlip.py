@@ -213,15 +213,14 @@ class PreProcessVideos:
                 continue
 
             signal_path = video_path.replace("locomotion_video_000", "locomotion_signal_2to6_agg").replace("output.mp4",
-                                                                                                      "channels.pt")
+                                                                                                           "channels.pt")
 
             camera_pose_path = video_path.replace("output.mp4", "camera_pose.npy")
 
-            """
-            if np.load(camera_pose_path) == np.array([]):
+            if not os.path.exists(camera_pose_path):
                 print(f"No camera_pose_path {camera_pose_path}")
                 continue
-            """
+
             if not os.path.exists(signal_path):
                 print(f"No signal data {signal_path}")
                 continue

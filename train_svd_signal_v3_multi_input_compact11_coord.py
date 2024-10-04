@@ -46,7 +46,7 @@ from diffusers.pipelines.stable_video_diffusion.pipeline_stable_video_diffusion 
 
 from models.layerdiffuse_VAE import LatentSignalEncoder, SignalEncoder, SignalEncoder2, ImageReduction, \
     MultiSignalEncoder, TransformNet, SignalTransformer, CompactSignalEncoder2, \
-    CompactSignalTransformer2, CompactImageReduction, CompactSignalEncoder3_2
+    CompactSignalTransformer2, CompactImageReduction, CompactSignalEncoder3_2, FFTConv1DLinearModel
 # from models.pipeline_stable_video_diffusion import StableVideoDiffusionPipeline
 from utils.common import log_scale_tensor
 from utils.dataset import get_train_dataset, extend_datasets, normalize_input
@@ -131,6 +131,7 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
     # for intiial signal
     # n_input_frames += 1
     fps += 1
+    # encoder_hidden_states for initial signals
     signal_encoder = CompactSignalTransformer2(input_size=CHIRP_LEN, frame_step=frame_step,
                                                n_input_frames=n_input_frames, target_h=16, target_w=64)
 
@@ -139,8 +140,10 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
     input_latents_dim2 = 100
 
     # signal_encoder2 = LatentSignalEncoder(output_dim=input_latents_dim1 * input_latents_dim2)
+    # latents for whole signals
     signal_encoder2 = CompactSignalEncoder3_2(signal_data_dim=CHIRP_LEN, fps=fps, frame_step=frame_step,
                                             target_h=width // 8, target_w=height // 8)
+    # latents for initial signals
     signal_encoder3 = CompactSignalTransformer2(input_size=CHIRP_LEN, frame_step=frame_step,
                                                n_input_frames=n_input_frames, target_h=width // 8, target_w=height // 8)
 
@@ -520,6 +523,8 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     signal_values = torch.real(batch['signal_values']).float().half()  # [B, FPS * frame_step, 512]
     # signal_values = signal_values * 1e4
     # signal_values = log_scale_tensor(torch.abs(signal_values) * 1e3)
+    signal_values = signal_values * 1e3
+
     if torch.isnan(signal_values).any():
         print(signal_values)
         signal_values = torch.nan_to_num(signal_values, nan=0.0)
@@ -784,7 +789,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("compact_init_10inputs_11channels_coords")
+        accelerator.init_trackers("compact_init_10inputs_11channels_1e3_all_coords")
         wandb.login(key="a94ace7392048e560ce6962a468101c6f0158b55")
         wandb.require("core")
 
@@ -1004,6 +1009,7 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
 
         # result_signal = result_signal * 1e4
         # result_signal = log_scale_tensor(torch.abs(result_signal) * 1e3)
+        result_signal = result_signal * 1e3
         if torch.isnan(result_signal).any():
             print(result_signal)
             result_signal = torch.nan_to_num(result_signal, nan=0.0)

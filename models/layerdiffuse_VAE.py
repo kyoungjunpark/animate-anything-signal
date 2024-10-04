@@ -455,8 +455,8 @@ class CompactSignalEncoder3(nn.Module):
 class CompactSignalEncoder3_2(nn.Module):
     def __init__(self, signal_data_dim=512, target_h=1, target_w=1, fps=25, frame_step=2):
         super(CompactSignalEncoder3_2, self).__init__()
-        self.conv1 = nn.Conv1d(in_channels=frame_step, out_channels=128, kernel_size=1, padding=0)
-        self.conv2 = nn.Conv1d(in_channels=128, out_channels=256, kernel_size=1, padding=0)
+        self.conv1 = nn.Conv1d(in_channels=frame_step, out_channels=128, kernel_size=3, stride=1, padding=0)
+        self.conv2 = nn.Conv1d(in_channels=128, out_channels=256, kernel_size=3, stride=1, padding=0)
         self.fc = nn.Linear(256 * signal_data_dim, 2048)
         self.fc2 = nn.Linear(2048, target_h * target_w * 1)
 
@@ -496,6 +496,147 @@ class CompactSignalEncoder3_2(nn.Module):
         x = x.view(batch_size, frames, 1, self.target_h, self.target_w)
 
         return x
+
+
+class FFTConv1DLinearModel(nn.Module):
+    def __init__(self, input_size=512, target_h=1, target_w=1, channel=3, frame_step=2, n_input_frames=5, output_dim=4, out_channel=3):
+        super(FFTConv1DLinearModel, self).__init__()
+        # Conv1D layer: 6 input channels (real and imaginary for each of 3 input channels)
+        self.conv1d = nn.Conv1d(in_channels=channel*2, out_channels=32, kernel_size=3, stride=1, padding=1)
+        self.conv1d2 = nn.Conv1d(in_channels=32, out_channels=64, kernel_size=3, stride=1, padding=1)
+
+        # SiLU activation function
+        self.silu = nn.SiLU()
+
+        # Calculate the flattened input size for the linear layer
+        self.flattened_size = 64 * n_input_frames * input_size  # 16 channels * 25 frames after Conv1d
+        # 64 * 10 * 512
+        # Linear layer that will produce the desired output shape (64 * 64 features)
+        self.linear = nn.Linear(self.flattened_size, 1024)
+        self.linear2 = nn.Linear(1024, out_channel * target_h * target_w)
+        # 2x327680
+        self.target_h = target_h
+        self.target_w = target_w
+        self.out_channel = out_channel
+
+    def forward(self, x):
+        # Input: (batch_size, frames, channels, signal_data)
+
+        # Step 1: Apply FFT along the signal_data dimension (last dimension)
+        x_fft = torch.fft.fft(x, dim=-1)
+
+        # Step 2: Extract real and imaginary parts of FFT output
+        x_real = x_fft.real
+        x_imag = x_fft.imag
+
+        # Step 3: Stack real and imaginary parts across the channel dimension
+        # After stacking, we will have 6 channels (3 real + 3 imaginary)
+        x_combined = torch.cat([x_real, x_imag], dim=2)  # (batch_size, frames, 6, signal_data)
+
+        # Step 4: Permute the dimensions to match Conv1d's expected input: (batch_size, channels, frames)
+        x_combined = x_combined.view(x_combined.size(0), x_combined.size(2), -1)  # (batch_size, 6, frames)
+        # print("x_combined: ", x_combined.size())
+        # Step 5: Apply Conv1d to the combined real and imaginary parts
+        x_conv = self.conv1d(x_combined)
+        x_conv = self.silu(x_conv)
+        x_conv = self.conv1d2(x_conv)
+        x_conv = self.silu(x_conv)
+        # Step 7: Flatten the Conv1d output to shape (batch_size, flattened_size)
+        x_flatten = x_conv.view(x_conv.size(0), -1)
+        # 1: torch.Size([2, 32, 5118]) 5118 =
+        # 2: torch.Size([2, 32, 5118])
+        # Step 8: Pass the flattened data through the Linear layer
+        x_linear = self.linear(x_flatten)
+        x_linear = self.silu(x_linear)
+        x_linear = self.linear2(x_linear)
+        x_linear = self.silu(x_linear)
+        # Step 10: Reshape the output to (batch_size, 1, 1, 64, 64)
+        x_reshaped = x_linear.view(x_linear.size(0), 1, self.out_channel, self.target_h, self.target_w)
+
+        return x_reshaped
+
+
+class FFTConv1DLinearModel2(nn.Module):
+    def __init__(self, signal_data_dim=512, target_h=1, target_w=1, fps=25, frame_step=2):
+        super(FFTConv1DLinearModel2, self).__init__()
+        # Conv1D layer: 6 input channels (real and imaginary for each of 3 input channels)
+        # SiLU activation function
+        self.silu = nn.SiLU()
+        # Linear layer that will produce the desired output shape (64 * 64 features)
+        # self.linear = nn.Linear(self.flattened_size, target_h * target_w)
+        self.target_h = target_h
+        self.target_w = target_w
+
+        self.conv1d = nn.Conv1d(in_channels=frame_step * 2, out_channels=32, kernel_size=3, stride=1, padding=1)
+        self.conv1d2 = nn.Conv1d(in_channels=32, out_channels=64, kernel_size=3, stride=1, padding=1)
+
+        # SiLU activation function
+        self.silu = nn.SiLU()
+
+        # Linear layer for outputting target_h * target_w for each frame
+        self.flattened_size = 64 * 512  # Conv1D output channels * 1 frame
+        self.linear = nn.Linear(self.flattened_size, 1024)
+        self.linear2 = nn.Linear(1024, self.target_h * self.target_w * 3)
+
+    def forward(self, x):
+        batch_size, frames, channels, signal_data = x.shape
+
+        # Initialize list to store the output for each frame
+        frame_outputs = []
+
+        # Loop through each frame independently
+        for frame_idx in range(frames):
+            # Extract the current frame (batch_size, channels, signal_data)
+            x_frame = x[:, frame_idx, :, :]  # (batch_size, channels, signal_data)
+
+            # Step 1: Apply FFT along the signal_data dimension
+            x_fft = torch.fft.fft(x_frame, dim=-1)
+
+            # Step 2: Extract real and imaginary parts of FFT output
+            x_real = x_fft.real
+            x_imag = x_fft.imag
+
+            # Step 3: Stack real and imaginary parts across the channel dimension
+            # After stacking, we will have 6 channels (3 real + 3 imaginary)
+            x_combined = torch.cat([x_real, x_imag], dim=1)  # (batch_size, 6, signal_data)
+            # print("x_combined: ", x_combined.size())
+            # x_combined:  torch.Size([2, 6, 512])
+            # x_conv:  torch.Size([2, 32, 512])
+
+            # Step 4: Apply Conv1d to the combined real and imaginary parts
+            x_conv = self.conv1d(x_combined)
+
+            # Step 5: Apply SiLU activation after Conv1d
+            x_conv = self.silu(x_conv)
+            # print("x_conv: ", x_conv.size())
+            x_conv = self.conv1d2(x_conv)
+
+            # Step 5: Apply SiLU activation after Conv1d
+            x_conv = self.silu(x_conv)
+
+            # Step 6: Flatten the Conv1d output to shape (batch_size, flattened_size)
+            x_flatten = x_conv.view(x_conv.size(0), -1)  # (batch_size, 16)
+            # [rank2]: RuntimeError: mat1 and mat2 shapes cannot be multiplied (2x16384 and 32768x4096)
+            # Step 7: Pass the flattened data through the Linear layer
+            x_linear = self.linear(x_flatten)
+            # [rank0]: RuntimeError: mat1 and mat2 shapes cannot be multiplied (2x16384 and 32x4096)
+            # Step 8: Apply SiLU activation after Linear
+            x_linear = self.silu(x_linear)
+            x_linear = self.linear2(x_linear)
+            # [rank0]: RuntimeError: mat1 and mat2 shapes cannot be multiplied (2x16384 and 32x4096)
+            # Step 8: Apply SiLU activation after Linear
+
+            # Step 9: Reshape the output to (batch_size, 1, target_h, target_w)
+            x_reshaped = x_linear.view(x_linear.size(0), 3, self.target_h, self.target_w)
+
+            # Step 10: Store the output for this frame
+            frame_outputs.append(x_reshaped)
+
+        # Step 11: Stack the frame outputs along the frames dimension
+        # Output shape: (batch_size, frames, 1, target_h, target_w)
+        output = torch.stack(frame_outputs, dim=1)
+
+        return output
 
 
 class ImageReduction(nn.Module):
