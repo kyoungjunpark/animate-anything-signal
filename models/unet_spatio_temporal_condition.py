@@ -475,7 +475,8 @@ class UNetSpatioTemporalConditionModel(ModelMixin, ConfigMixin, UNet2DConditionL
                     res_hidden_states_tuple=res_samples,
                     image_only_indicator=image_only_indicator,
                 )
-
+        # make new layer for outputting human pos
+        print("sample size", sample.size())
         # 6. post-process
         sample = self.conv_norm_out(sample)
         sample = self.conv_act(sample)

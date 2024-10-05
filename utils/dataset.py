@@ -159,6 +159,16 @@ def get_frame_agg_signal_batch(signal_path, tx_path, camera_pose_path, max_frame
     # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     channels = torch.load(signal_path, map_location="cuda:0", weights_only=True)
+    # Read the file and split lines
+    with open(signal_path.replace("channels.pt", "human.txt"), 'r') as f:
+        lines = f.readlines()
+
+    # Parse the coordinates into a list of tuples by splitting on commas
+    coords = [list(map(float, line.strip().split(','))) for line in lines]
+
+    # Convert to a PyTorch tensor
+    human_coords = torch.tensor(coords).cuda()
+
     # print("check", frame_step, start, max_frames, frame_range_indices, max_range, frame_range)
 
     if frame_range_indices[0] - frame_step >= 0:
@@ -224,7 +234,7 @@ def get_frame_agg_signal_batch(signal_path, tx_path, camera_pose_path, max_frame
     tx_pos = np.loadtxt(tx_path)
 
     # partial_channels = np.array(0)
-    return video, partial_channels, camera_pose, tx_pos, frame_step
+    return video, partial_channels, camera_pose, tx_pos, frame_step, human_coords
 
 
 def process_video(vid_path, use_bucketing, w, h, get_frame_buckets, get_frame_batch):
@@ -382,7 +392,7 @@ class VideoBLIPDataset(Dataset):
 
         vr = decord.VideoReader(clip_path)
 
-        video, signal, frame_step = get_frame_agg_signal_batch(vid_data[self.sig_data_key], self.n_sample_frames,
+        video, signal, frame_step, human_coords = get_frame_agg_signal_batch(vid_data[self.sig_data_key], self.n_sample_frames,
                                                                self.fps, vr, self.transform)
         # video = get_frame_batch(self.n_sample_frames, self.fps, vr, self.transform)
 
@@ -535,7 +545,7 @@ class VideoBLIPDataset_V2(Dataset):
 
         vr = decord.VideoReader(clip_path)
 
-        video, signal, camera_pose, tx_pos, frame_step = get_frame_agg_signal_batch(vid_data[self.sig_data_key], vid_data[self.tx_pos_key],
+        video, signal, camera_pose, tx_pos, frame_step, human_coords = get_frame_agg_signal_batch(vid_data[self.sig_data_key], vid_data[self.tx_pos_key],
                                                                vid_data[self.camera_pose_key], self.n_sample_frames,
                                                                self.fps, vr, self.transform)
         # video = get_frame_batch(self.n_sample_frames, self.fps, vr, self.transform)
@@ -549,6 +559,7 @@ class VideoBLIPDataset_V2(Dataset):
             "signal_values": signal,
             "camera_pose": camera_pose,
             "tx_pos": tx_pos,
+            "human_pos": human_coords,
             "prompt_ids": prompt_ids,
             "text_prompt": prompt,
             "frame_step": frame_step,

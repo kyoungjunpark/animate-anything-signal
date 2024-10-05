@@ -576,7 +576,7 @@ class FFTConv1DLinearModel2(nn.Module):
         # Linear layer for outputting target_h * target_w for each frame
         self.flattened_size = 64 * 512  # Conv1D output channels * 1 frame
         self.linear = nn.Linear(self.flattened_size, 1024)
-        self.linear2 = nn.Linear(1024, self.target_h * self.target_w * 3)
+        self.linear2 = nn.Linear(1024, self.target_h * self.target_w * 4)
 
     def forward(self, x):
         batch_size, frames, channels, signal_data = x.shape
@@ -627,7 +627,7 @@ class FFTConv1DLinearModel2(nn.Module):
             # Step 8: Apply SiLU activation after Linear
 
             # Step 9: Reshape the output to (batch_size, 1, target_h, target_w)
-            x_reshaped = x_linear.view(x_linear.size(0), 3, self.target_h, self.target_w)
+            x_reshaped = x_linear.view(x_linear.size(0), 4, self.target_h, self.target_w)
 
             # Step 10: Store the output for this frame
             frame_outputs.append(x_reshaped)
