@@ -13,6 +13,7 @@ from itertools import islice
 from pathlib import Path
 from .bucketing import sensible_buckets
 from .common import get_moved_area_mask, calculate_motion_score
+import torch.nn.functional as F
 
 decord.bridge.set_bridge('torch')
 
@@ -126,13 +127,22 @@ def get_frame_signal_batch(signal_path, initial_signal_path, max_frames, sample_
 
     channels = torch.load(signal_path, map_location="cuda:0", weights_only=True)
 
+    initial_channels = torch.load(initial_signal_path, map_location="cuda:0", weights_only=True)
+
     partial_channels = channels[frame_range_indices, :]
 
+    initial_channels = initial_channels.unsqueeze(0)  # Now shape is (1, 512)
+    # channel range: tensor(-0.0050) tensor(0.0049)
+    # init channel range: tensor(-0.0048) tensor(0.0048)
+    # but mostly very small -/+
+    # log10 -> nan
+    # preprocess: log10(channel * 1e5)
+    # result_signal = torch.cat((initial_channels, partial_channels), dim=0)  # Result shape will be (53, 512)
     # partial_channels = np.array(0)
     return video, partial_channels
 
 
-def get_frame_agg_signal_batch(signal_path, tx_path, camera_pose_path, max_frames, sample_fps, vr, transform):
+def get_frame_agg_signal_batch(signal_path, initial_signal_path, tx_path, camera_pose_path, max_frames, sample_fps, vr, transform):
     native_fps = vr.get_avg_fps()
     max_range = len(vr)
     frame_step = max(1, round(native_fps / sample_fps))
@@ -161,70 +171,27 @@ def get_frame_agg_signal_batch(signal_path, tx_path, camera_pose_path, max_frame
 
     # print("check", frame_step, start, max_frames, frame_range_indices, max_range, frame_range)
 
-    if frame_range_indices[0] - frame_step >= 0:
-        partial_channels = channels[frame_range_indices[0] - frame_step:frame_range_indices[-1], :]
-        # print(partial_channels.size())  # 75, 512
-        # partial_channels = partial_channels.reshape()
-    else:
-        partial_channels = []
+    partial_channels = channels[frame_range_indices[0]:frame_range_indices[-1] + frame_step, :]
+    human_coords = human_coords[frame_range_indices]
 
-        for i in range(0, len(frame_range_indices)):
-            # frame_range_indices[i] 2
-            # frame_range_indices[i-1 ] 0
-            if i == 0:
-                if frame_range_indices[i] >= frame_step:
-                    tmp_channel = channels[frame_range_indices[i] - frame_step:frame_range_indices[i], :]
-                    assert tmp_channel.size(0) == frame_step
-                    partial_channels.append(tmp_channel)
-                else:
-                    tmp_channel = channels[0:frame_range_indices[i], :]
+    partial_channels = F.pad(partial_channels, (0, 0, 0, 75 - partial_channels.size(0)))
 
-                    first_element = channels[0]
-                    first_element = first_element.unsqueeze(0)
-                    first_element_duplicated = first_element.repeat(frame_step - frame_range_indices[i], 1)
-                    tmp_channel = torch.cat((first_element_duplicated, tmp_channel), dim=0)
-                    assert tmp_channel.size(0) == frame_step, tmp_channel.size()
-                    partial_channels.append(tmp_channel)
-            else:
-                frame_diff = frame_range_indices[i] + 1 - frame_range_indices[i - 1]
-
-                # frame_diff 3
-                if frame_diff == frame_step + 1:
-                    tmp_channel = channels[frame_range_indices[i - 1]:frame_range_indices[i], :]
-                    assert tmp_channel.size(0) == frame_step
-                    partial_channels.append(tmp_channel)
-                else:
-                    tmp_channel = channels[frame_range_indices[i - 1]:frame_range_indices[i], :]
-
-                    first_element = channels[frame_range_indices[i - 1]]
-                    first_element = first_element.unsqueeze(0)
-                    first_element_duplicated = first_element.repeat(frame_step - frame_diff + 1, 1)
-                    tmp_channel = torch.cat((first_element_duplicated, tmp_channel), dim=0)
-                    assert tmp_channel.size(0) == frame_step, tmp_channel.size()
-                    partial_channels.append(tmp_channel)
-
-            #            else:
-            #                 raise Exception(frame_range_indices)
-
-            """
-            elif frame_range_indices[i] - frame_range_indices[i-1] == frame_step - 1:
-                first_element = channels[frame_range_indices[i]].unsqueeze(0)
-                tmp_channel = channels[frame_range_indices[i]:frame_range_indices[i+1], :]
-
-                tmp_channel = torch.cat((first_element, tmp_channel), dim=0)
-                assert tmp_channel.size(0) == frame_step
-                partial_channels.append(tmp_channel)
-            """
-
-        partial_channels = torch.cat(partial_channels, dim=0)
-
-    # print(partial_channels.size()) # 75, 512
-
+    # print("ddddddd:", partial_channels.size(), human_coords.size())
     camera_pose = np.load(camera_pose_path)
     tx_pos = np.loadtxt(tx_path)
+    initial_channels = torch.load(initial_signal_path, map_location="cuda:0", weights_only=True)
+
+    initial_channels = initial_channels.unsqueeze(0)  # Now shape is (1, 512)
+    # channel range: tensor(-0.0050) tensor(0.0049)
+    # init channel range: tensor(-0.0048) tensor(0.0048)
+    # but mostly very small -/+
+    # log10 -> nan
+    # preprocess: log10(channel * 1e5)
+    # result_signal = torch.cat((initial_channels, partial_channels), dim=0)  # Result shape will be (53, 512)
+    result_channels = partial_channels - initial_channels
 
     # partial_channels = np.array(0)
-    return video, partial_channels, camera_pose, tx_pos, frame_step, human_coords
+    return video, result_channels, camera_pose, tx_pos, frame_step, human_coords
 
 
 def process_video(vid_path, use_bucketing, w, h, get_frame_buckets, get_frame_batch):
@@ -382,7 +349,7 @@ class VideoBLIPDataset(Dataset):
 
         vr = decord.VideoReader(clip_path)
 
-        video, signal, frame_step, human_coords = get_frame_agg_signal_batch(vid_data[self.sig_data_key], self.n_sample_frames,
+        video, signal, frame_step, human_coords = get_frame_agg_signal_batch(vid_data[self.sig_data_key], vid_data[self.initial_sig_data_key], self.n_sample_frames,
                                                                self.fps, vr, self.transform)
         # video = get_frame_batch(self.n_sample_frames, self.fps, vr, self.transform)
 
@@ -439,6 +406,7 @@ class VideoBLIPDataset_V2(Dataset):
             sig_data_key: str = "signal_path",
             tx_pos_key: str = "tx_path",
             camera_pose_key: str = "camera_pose_path",
+            initial_sig_data_key: str = "initial_signal_path",
             preprocessed: bool = False,
             use_bucketing: bool = False,
             motion_threshold=50,
@@ -453,6 +421,7 @@ class VideoBLIPDataset_V2(Dataset):
         self.sig_data_key = sig_data_key
         self.tx_pos_key = tx_pos_key
         self.camera_pose_key = camera_pose_key
+        self.initial_sig_data_key = initial_sig_data_key
 
         self.train_data = self.load_from_json(json_path, json_data)
         self.motion_threshold = motion_threshold
@@ -489,6 +458,7 @@ class VideoBLIPDataset_V2(Dataset):
         extended_data.append({
             self.vid_data_key: data[self.vid_data_key],
             self.sig_data_key: data[self.sig_data_key],
+            self.initial_sig_data_key: data[self.initial_sig_data_key],
             self.tx_pos_key: data[self.tx_pos_key],
             self.camera_pose_key: data[self.camera_pose_key],
             'frame_index': nested_data['frame_index'],
@@ -534,8 +504,7 @@ class VideoBLIPDataset_V2(Dataset):
             self.sample_start_idx = vid_data['frame_index']
 
         vr = decord.VideoReader(clip_path)
-
-        video, signal, camera_pose, tx_pos, frame_step, human_coords = get_frame_agg_signal_batch(vid_data[self.sig_data_key], vid_data[self.tx_pos_key],
+        video, signal, camera_pose, tx_pos, frame_step, human_coords = get_frame_agg_signal_batch(vid_data[self.sig_data_key], vid_data[self.initial_sig_data_key], vid_data[self.tx_pos_key],
                                                                vid_data[self.camera_pose_key], self.n_sample_frames,
                                                                self.fps, vr, self.transform)
         # video = get_frame_batch(self.n_sample_frames, self.fps, vr, self.transform)
@@ -543,7 +512,6 @@ class VideoBLIPDataset_V2(Dataset):
         # prompt_ids = np.array(0)
         # prompt = np.array(0)
         prompt_ids = get_prompt_ids(prompt, self.tokenizer)
-        print("human_coords", human_coords.size(), signal.size(), video.size())
         example = {
             "pixel_values": normalize_input(video),
             "signal_values": signal,
