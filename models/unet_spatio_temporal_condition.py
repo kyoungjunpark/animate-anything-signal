@@ -71,7 +71,7 @@ class UNetSpatioTemporalConditionModel(ModelMixin, ConfigMixin, UNet2DConditionL
         self,
         sample_size: Optional[int] = None,
         # in_channels: int = 8,
-        in_channels: int = 8 + 5,  # for signal
+        in_channels: int = 8,  # for signal
         out_channels: int = 4,
         down_block_types: Tuple[str] = (
             "CrossAttnDownBlockSpatioTemporal",
@@ -476,7 +476,8 @@ class UNetSpatioTemporalConditionModel(ModelMixin, ConfigMixin, UNet2DConditionL
                     image_only_indicator=image_only_indicator,
                 )
         # make new layer for outputting human pos
-        print("sample size", sample.size())
+        # print("sample size", sample.size())
+        #     # sample size torch.Size([50, 320, 64, 64])
         # 6. post-process
         sample = self.conv_norm_out(sample)
         sample = self.conv_act(sample)

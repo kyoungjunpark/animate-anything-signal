@@ -499,17 +499,17 @@ class CompactSignalEncoder3_2(nn.Module):
 
 
 class FFTConv1DLinearModel(nn.Module):
-    def __init__(self, input_size=512, target_h=1, target_w=1, channel=3, frame_step=2, n_input_frames=5, output_dim=4, out_channel=3):
+    def __init__(self, input_size=512, target_h=1, target_w=1, channel=3, frame_step=3, n_input_frames=5, output_dim=4, out_channel=3):
         super(FFTConv1DLinearModel, self).__init__()
         # Conv1D layer: 6 input channels (real and imaginary for each of 3 input channels)
-        self.conv1d = nn.Conv1d(in_channels=channel*2, out_channels=32, kernel_size=3, stride=1, padding=1)
+        self.conv1d = nn.Conv1d(in_channels=frame_step*2, out_channels=32, kernel_size=3, stride=1, padding=1)
         self.conv1d2 = nn.Conv1d(in_channels=32, out_channels=64, kernel_size=3, stride=1, padding=1)
 
         # SiLU activation function
         self.silu = nn.SiLU()
 
         # Calculate the flattened input size for the linear layer
-        self.flattened_size = 64 * n_input_frames * input_size  # 16 channels * 25 frames after Conv1d
+        self.flattened_size = 64 * n_input_frames * frame_step * input_size  # 16 channels * 25 frames after Conv1d
         # 64 * 10 * 512
         # Linear layer that will produce the desired output shape (64 * 64 features)
         self.linear = nn.Linear(self.flattened_size, 1024)

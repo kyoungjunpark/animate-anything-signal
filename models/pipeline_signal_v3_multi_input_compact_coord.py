@@ -68,6 +68,8 @@ def _gaussian_blur2d(input, kernel_size, sigma):
 
 
 def load_channel(channels, frame_step, frame_range_indices):
+    partial_channels = channels[frame_range_indices[0] - frame_step:frame_range_indices[-1], :]
+
     if frame_range_indices[0] - frame_step >= 0:
         partial_channels = channels[frame_range_indices[0] - frame_step:frame_range_indices[-1], :]
 
@@ -110,6 +112,14 @@ def load_channel(channels, frame_step, frame_range_indices):
                     partial_channels.append(tmp_channel)
 
             partial_channels = torch.cat(partial_channels, dim=0)
+    return partial_channels
+
+
+def load_channel2(channels, frame_step, frame_range_indices):
+    partial_channels = channels[frame_range_indices[0]:frame_range_indices[-1] + frame_step, :]
+
+    partial_channels = F.pad(partial_channels, (0, 0, 0, 75 - partial_channels.size(0)))
+
     return partial_channels
 
 
@@ -451,11 +461,12 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         frame_step = max(1, round(native_fps / sample_fps))
         frame_range = range(0, max_frame, frame_step)
 
-        frame_range_indices = list(frame_range)[1:1 + num_frames]
+        start = 0
+        frame_range_indices = list(frame_range)[start:start + num_frames]
         # shift  for initial signal,
         frame_range_indices = [x + 1 for x in frame_range_indices]
         # print(signal_values.unsqueeze(0).size())
-        signal_values = load_channel(signal_values, frame_step, frame_range_indices)
+        signal_values = load_channel2(signal_values, frame_step, frame_range_indices)
         signal_values = signal_values.unsqueeze(0)
 
         # bsz = signal_values.size(0)

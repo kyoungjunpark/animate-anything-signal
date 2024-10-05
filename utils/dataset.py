@@ -126,20 +126,10 @@ def get_frame_signal_batch(signal_path, initial_signal_path, max_frames, sample_
 
     channels = torch.load(signal_path, map_location="cuda:0", weights_only=True)
 
-    initial_channels = torch.load(initial_signal_path, map_location="cuda:0", weights_only=True)
-
     partial_channels = channels[frame_range_indices, :]
 
-    initial_channels = initial_channels.unsqueeze(0)  # Now shape is (1, 512)
-    # channel range: tensor(-0.0050) tensor(0.0049)
-    # init channel range: tensor(-0.0048) tensor(0.0048)
-    # but mostly very small -/+
-    # log10 -> nan
-    # preprocess: log10(channel * 1e5)
-    # result_signal = torch.cat((initial_channels, partial_channels), dim=0)  # Result shape will be (53, 512)
-    result_signal = partial_channels - initial_channels
     # partial_channels = np.array(0)
-    return video, result_signal
+    return video, partial_channels
 
 
 def get_frame_agg_signal_batch(signal_path, tx_path, camera_pose_path, max_frames, sample_fps, vr, transform):
@@ -553,7 +543,7 @@ class VideoBLIPDataset_V2(Dataset):
         # prompt_ids = np.array(0)
         # prompt = np.array(0)
         prompt_ids = get_prompt_ids(prompt, self.tokenizer)
-
+        print("human_coords", human_coords.size(), signal.size(), video.size())
         example = {
             "pixel_values": normalize_input(video),
             "signal_values": signal,
