@@ -174,7 +174,6 @@ def get_frame_agg_signal_batch(signal_path, initial_signal_path, tx_path, camera
     partial_channels = channels[frame_range_indices[0]:frame_range_indices[-1] + frame_step, :]
     human_coords = human_coords[frame_range_indices]
 
-    # print("ddddddd:", partial_channels.size(), human_coords.size())
     camera_pose = np.load(camera_pose_path)
     tx_pos = np.loadtxt(tx_path)
     initial_channels = torch.load(initial_signal_path, map_location="cuda:0", weights_only=True)
@@ -187,13 +186,15 @@ def get_frame_agg_signal_batch(signal_path, initial_signal_path, tx_path, camera
     # preprocess: log10(channel * 1e5)
     # result_signal = torch.cat((initial_channels, partial_channels), dim=0)  # Result shape will be (53, 512)
     if random.random() < empty_room_ratio:
-        result_channels = initial_channels.repeat(max_frames, 1)
+        result_channels = initial_channels.repeat(max_frames * frame_step, 1)
+        # result_channels = initial_channels.repeat(max_frames, 1)
         video = video[0].repeat(max_frames, 1, 1, 1)
+        human_coords = True
     else:
         result_channels = partial_channels - initial_channels
         result_channels = F.pad(result_channels, (0, 0, 0, 25 * frame_step - partial_channels.size(0)))
+        human_coords = False
 
-    # partial_channels = np.array(0)
     return video, result_channels, camera_pose, tx_pos, frame_step, human_coords
 
 
@@ -359,7 +360,6 @@ class VideoBLIPDataset(Dataset):
         # prompt_ids = np.array(0)
         # prompt = np.array(0)
         prompt_ids = get_prompt_ids(prompt, self.tokenizer)
-
         example = {
             "pixel_values": normalize_input(video),
             "signal_values": signal,
@@ -437,7 +437,6 @@ class VideoBLIPDataset_V2(Dataset):
         self.fps = fps
         self.n_input_frames = n_input_frames
         self.empty_room_ratio = empty_room_ratio
-        assert self.empty_room_ratio != 0.0
 
 
         self.transform = T.Compose([
@@ -519,6 +518,12 @@ class VideoBLIPDataset_V2(Dataset):
         # prompt_ids = np.array(0)
         # prompt = np.array(0)
         prompt_ids = get_prompt_ids(prompt, self.tokenizer)
+        if human_coords:
+            prompt = "empty"
+
+        else:
+            prompt = "not"
+
         example = {
             "pixel_values": normalize_input(video),
             "signal_values": signal,
@@ -550,8 +555,6 @@ class VideoBLIPDataset_V2(Dataset):
 
     def __getitem__(self, index):
         example = self.train_data_sig_agg_batch(index)
-        if example['motion'] < self.motion_threshold:
-            return self.__getitem__(random.randint(0, len(self) - 1))
         return example
 
 

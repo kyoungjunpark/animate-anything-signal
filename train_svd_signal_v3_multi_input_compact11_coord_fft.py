@@ -527,20 +527,12 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     frame_step = batch["frame_step"][0].item()
     # print("frame_step", frame_step)
     signal_values = torch.real(batch['signal_values']).float().half()  # [B, FPS * frame_step, 512]
-    # signal_values = signal_values * 1e4
-    # signal_values = log_scale_tensor(torch.abs(signal_values) * 1e3)
-    # signal_values = signal_values * 1e3
 
     if torch.isnan(signal_values).any():
         print(signal_values)
         signal_values = torch.nan_to_num(signal_values, nan=0.0)
 
-    # [B, FPS, 512] -> [B * FPS, 512]
-    # print(signal_values.size())
-    # print("0", signal_values.size())  # torch.Size([2, 75, 512])
     signal_values_reshaped = rearrange(signal_values, 'b (f c) h-> b f c h', c=frame_step)  # [B, FPS, 32]
-    # print("0.5", signal_values_reshaped.size())  # torch.Size([2, 5, 3, 512])
-    # print("signal_values_reshaped", signal_values_reshaped.size())
     signal_values_reshaped_input = signal_values_reshaped[:, :n_input_frames]
 
     signal_embeddings = signal_encoder(signal_values_reshaped_input)
@@ -752,7 +744,7 @@ def main(
     else:
         train_dataset = torch.utils.data.ConcatDataset(train_datasets)
 
-        # DataLoaders creation:
+    # DataLoaders creation:
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=train_batch_size,
@@ -787,7 +779,7 @@ def main(
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
         wandb.login(key="a94ace7392048e560ce6962a468101c6f0158b55")
-        accelerator.init_trackers("17channels_1e3_human_pos_lr1e5_fft_fix_start")
+        accelerator.init_trackers("17channels_1e3_lr1e5_fft_fix_start_exmpty0.3")
         wandb.require("core")
     # Train!
     total_batch_size = train_batch_size * accelerator.num_processes * gradient_accumulation_steps

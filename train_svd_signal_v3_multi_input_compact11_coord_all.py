@@ -773,7 +773,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("compact_all_init_5inputs_16channels_coords_1e5")
+        accelerator.init_trackers("compact_all_init_5inputs_16channels_coords_lr5e5empty0.1")
         wandb.require("core")
 
     # Train!
