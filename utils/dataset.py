@@ -142,7 +142,7 @@ def get_frame_signal_batch(signal_path, initial_signal_path, max_frames, sample_
     return video, partial_channels
 
 
-def get_frame_agg_signal_batch(signal_path, initial_signal_path, tx_path, camera_pose_path, max_frames, sample_fps, vr, transform):
+def get_frame_agg_signal_batch(signal_path, initial_signal_path, tx_path, camera_pose_path, max_frames, sample_fps, vr, transform, empty_room_ratio):
     native_fps = vr.get_avg_fps()
     max_range = len(vr)
     frame_step = max(1, round(native_fps / sample_fps))
@@ -174,8 +174,6 @@ def get_frame_agg_signal_batch(signal_path, initial_signal_path, tx_path, camera
     partial_channels = channels[frame_range_indices[0]:frame_range_indices[-1] + frame_step, :]
     human_coords = human_coords[frame_range_indices]
 
-    partial_channels = F.pad(partial_channels, (0, 0, 0, 75 - partial_channels.size(0)))
-
     # print("ddddddd:", partial_channels.size(), human_coords.size())
     camera_pose = np.load(camera_pose_path)
     tx_pos = np.loadtxt(tx_path)
@@ -188,7 +186,12 @@ def get_frame_agg_signal_batch(signal_path, initial_signal_path, tx_path, camera
     # log10 -> nan
     # preprocess: log10(channel * 1e5)
     # result_signal = torch.cat((initial_channels, partial_channels), dim=0)  # Result shape will be (53, 512)
-    result_channels = partial_channels - initial_channels
+    if random.random() < empty_room_ratio:
+        result_channels = initial_channels.repeat(max_frames, 1)
+        video = video[0].repeat(max_frames, 1, 1, 1)
+    else:
+        result_channels = partial_channels - initial_channels
+        result_channels = F.pad(result_channels, (0, 0, 0, 25 * frame_step - partial_channels.size(0)))
 
     # partial_channels = np.array(0)
     return video, result_channels, camera_pose, tx_pos, frame_step, human_coords
@@ -400,6 +403,7 @@ class VideoBLIPDataset_V2(Dataset):
             sample_start_idx: int = 1,
             fps: int = 1,
             n_input_frames=1,
+            empty_room_ratio=0.0,
             json_path: str = "",
             json_data=None,
             vid_data_key: str = "video_path",
@@ -432,6 +436,8 @@ class VideoBLIPDataset_V2(Dataset):
         self.sample_start_idx = sample_start_idx
         self.fps = fps
         self.n_input_frames = n_input_frames
+        self.empty_room_ratio = empty_room_ratio
+        assert self.empty_room_ratio != 0.0
 
 
         self.transform = T.Compose([
@@ -491,6 +497,7 @@ class VideoBLIPDataset_V2(Dataset):
         return resize
 
     def train_data_sig_agg_batch(self, index):
+
         vid_data = self.train_data[index]
         # Get video prompt
         prompt = vid_data['prompt']
@@ -506,7 +513,7 @@ class VideoBLIPDataset_V2(Dataset):
         vr = decord.VideoReader(clip_path)
         video, signal, camera_pose, tx_pos, frame_step, human_coords = get_frame_agg_signal_batch(vid_data[self.sig_data_key], vid_data[self.initial_sig_data_key], vid_data[self.tx_pos_key],
                                                                vid_data[self.camera_pose_key], self.n_sample_frames,
-                                                               self.fps, vr, self.transform)
+                                                               self.fps, vr, self.transform, self.empty_room_ratio)
         # video = get_frame_batch(self.n_sample_frames, self.fps, vr, self.transform)
 
         # prompt_ids = np.array(0)

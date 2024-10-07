@@ -565,10 +565,6 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     # Add noise to the latents according to the noise magnitude at each timestep
     # (this is the forward diffusion process) #[bsz, f, c, h , w]
 
-    # input_latents:  torch.Size([2, 25, 8, 64, 64])
-    # signal_embeddings2: torch.Size([2, 25, 8 -> 1, 64, 64])
-    # print("signal_embeddings2", signal_embeddings2.size())
-    # print("final latents ", input_latents.size()) # final latents  torch.Size([2, 25, 9, 64, 64])
 
     # Fourier embedding
     camera_pose = batch['camera_pose'].float().half()
