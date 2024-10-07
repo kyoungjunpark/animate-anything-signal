@@ -185,7 +185,7 @@ def get_frame_agg_signal_batch(signal_path, initial_signal_path, tx_path, camera
     # log10 -> nan
     # preprocess: log10(channel * 1e5)
     # result_signal = torch.cat((initial_channels, partial_channels), dim=0)  # Result shape will be (53, 512)
-    if random.random() < empty_room_ratio:
+    if random.random() < empty_room_ratio and video[0] == video[1]:
         result_channels = initial_channels.repeat(max_frames * frame_step, 1)
         # result_channels = initial_channels.repeat(max_frames, 1)
         video = video[0].repeat(max_frames, 1, 1, 1)
