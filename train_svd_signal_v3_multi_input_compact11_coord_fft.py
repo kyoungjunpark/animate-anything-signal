@@ -56,7 +56,7 @@ import imageio
 import wandb
 # from models.unet_3d_condition import UNet3DConditionModel
 
-from models.pipeline_signal_v3_multi_input_compact_coord_fft import MaskStableVideoDiffusionPipeline
+from models.pipeline_signal_v3_multi_input_compact_coord_compact import MaskStableVideoDiffusionPipeline
 
 decord.bridge.set_bridge('torch')
 
@@ -887,8 +887,7 @@ def main(
                         curr_dataset_name = batch['dataset'][0]
                         save_filename = f"{global_step}_dataset-{curr_dataset_name}"
                         out_file = f"{output_dir}/samples/"
-                        eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1,
-                             validation_data, out_file, global_step)
+                        eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, validation_data, out_file, global_step)
                         logger.info(f"Saved a new sample to {out_file}")
 
             logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
@@ -923,8 +922,7 @@ def main(
     accelerator.end_training()
 
 
-def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, validation_data, out_file, index,
-         forward_t=25, preview=True):
+def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, validation_data, out_file, index, forward_t=25, preview=True):
     vae = pipeline.vae
     device = vae.device
     dtype = vae.dtype

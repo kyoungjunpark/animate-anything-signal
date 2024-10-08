@@ -96,7 +96,7 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
     # 25 = 4(latent/noisy) + 1(signal) // + n_input_frames(5) // 1(initial signal)
     # prev in_channels: cond(4) + noise(4) (+ mask(1))
     # ++ init_images(1) + init_signals(1) + signal(1) + pos(1)
-    in_channels = 1 + 1 + 1 + 8 + 4
+    in_channels = 1 + 1 + 1 + 8 + 4 + 3 + 1
     if eval:
         pipeline = MaskStableVideoDiffusionPipeline.from_pretrained(pretrained_model_path, torch_dtype=torch.float16,
                                                                     variant='fp16')
@@ -108,9 +108,9 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
         # first time init, modify unet conv in
         unet2 = pipeline.unet
         unet = UNetSpatioTemporalConditionModel.from_pretrained(pretrained_model_path + "/unet",
-                                                    in_channels=in_channels,
-                                                    low_cpu_mem_usage=False, device_map=None,
-                                                    ignore_mismatched_sizes=True)
+                                                                in_channels=in_channels,
+                                                                low_cpu_mem_usage=False, device_map=None,
+                                                                ignore_mismatched_sizes=True)
         unet.conv_in.bias.data = copy.deepcopy(unet2.conv_in.bias)
         torch.nn.init.zeros_(unet.conv_in.weight)
         load_in_channel = unet2.conv_in.weight.data.shape[1]
@@ -480,7 +480,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     image = pixel_values[:, 0].to(dtype)
     noise_aug_strength = math.exp(random.normalvariate(mu=-3, sigma=0.5))
     image = image + noise_aug_strength * torch.randn_like(image)
-    image_latent = vae.encode(image).latent_dist.mode() * vae.config.scaling_factor # # n_input_frames Channel
+    image_latent = vae.encode(image).latent_dist.mode() * vae.config.scaling_factor  # # n_input_frames Channel
     condition_latent = repeat(image_latent, 'b c h w->b f c h w', f=num_frames)
 
     image = pixel_values[:, 0:n_input_frames].to(dtype)
@@ -773,7 +773,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("compact_all_init_5inputs_16channels_coords_lr5e5empty0.1")
+        accelerator.init_trackers("compact_all_init_5inputs_19c_rands_lr7e6empty0.05")
         wandb.require("core")
 
     # Train!
