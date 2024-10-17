@@ -160,7 +160,7 @@ def get_frame_agg_signal_batch(signal_path, initial_signal_path, tx_path, camera
 
     channels = torch.load(signal_path, map_location="cuda:0", weights_only=True)
     # Read the file and split lines
-    with open(signal_path.replace("frame1.pt", "human.txt"), 'r') as f:
+    with open(signal_path.replace("channels.pt", "human.txt"), 'r') as f:
         lines = f.readlines()
 
     # Parse the coordinates into a list of tuples by splitting on commas
@@ -179,22 +179,25 @@ def get_frame_agg_signal_batch(signal_path, initial_signal_path, tx_path, camera
     initial_channels = torch.load(initial_signal_path, map_location="cuda:0", weights_only=True)
 
     initial_channels = initial_channels.unsqueeze(0)  # Now shape is (1, 512)
+    initial_channels = initial_channels.repeat(3, 1, 1)
     # channel range: tensor(-0.0050) tensor(0.0049)
     # init channel range: tensor(-0.0048) tensor(0.0048)
     # but mostly very small -/+
     # log10 -> nan
     # preprocess: log10(channel * 1e5)
     if random.random() < empty_room_ratio and torch.equal(video[0], video[1]):
-        result_channels = initial_channels.repeat(max_frames * frame_step + 1, 1)
+        result_channels = initial_channels.repeat((max_frames+1), 1, 1)
         # result_channels = initial_channels.repeat(max_frames, 1)
         video = video[0].repeat(max_frames, 1, 1, 1)
         human_coords = True
+        # print("1:", result_channels.size(), initial_channels.size())
     else:
         # result_channels = partial_channels - initial_channels
         result_channels = torch.cat((initial_channels, partial_channels), dim=0)  # Result shape will be (53, 512)
-        result_channels = F.pad(result_channels, (0, 0, 0, 25 * frame_step + 1 - partial_channels.size(0)))
+        result_channels = F.pad(result_channels, (0, 0, 0, 0, (max_frames+1) * frame_step - result_channels.size(0), 0))
         human_coords = False
-
+        # print("2:", result_channels.size(), initial_channels.size(), partial_channels.size())
+        # 2: torch.Size([78, 512, 4]) torch.Size([3, 512, 4]) torch.Size([75, 512, 4])
     return video, result_channels, camera_pose, tx_pos, frame_step, human_coords
 
 

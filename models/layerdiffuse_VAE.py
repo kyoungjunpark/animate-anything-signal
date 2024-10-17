@@ -179,14 +179,14 @@ class CompactSignalTransformer(nn.Module):
         # Input: (batch, frames, channels, signal) = [2, 5, 3, 512]
 
         batch_size, frames, channels, signal = x.shape
-
+        print(x.shape)
         # Step 1: Reshape the signal (512) into (64, 64) spatial dimensions
         x = x.view(batch_size, frames, channels, -1)  # [2, 5, 3, 512]
         x = self.fc_signal_to_spatial(x)  # [2, 5, 3, 4096]
         x = x.view(batch_size * frames, channels, self.target_w, self.target_h)  # [2, 5, 3, 64, 64]
         x = self.conv(x)  # 10, 1, 64, 64
         x = x.view(batch_size, -1)  # [2, 5, 3, 64, 64]
-        x = self.fc1(x)  # 10, 1, 64, 64
+        x = self.fc(x)  # 10, 1, 64, 64
 
         x = self.fc2(x)  # 10, 1, 64, 64
         x = x.reshape(batch_size, 1, self.output_dim, self.target_w, self.target_h)  # [2, 15, 4096]
@@ -211,6 +211,7 @@ class CompactSignalTransformer2(nn.Module):
 
     def forward(self, x):
         batch_size, frames, channels, signal_data = x.shape
+        # torch.Size([2, 25, 3, 2048]) 512 * 4
         # torch.Size([2, 11, 3, 512])
         # Reshape for Conv1D: (batch_size * frames, channels, signal_data)
         x = x.reshape(batch_size * frames, channels * signal_data)
@@ -438,31 +439,38 @@ class CompactSignalEncoder3(nn.Module):
 
     def forward(self, x):
         batch_size, frames, channels, signal_data = x.shape
+        print(x.shape)
+        frame_outputs = []
 
-        # Reshape for Conv1D: (batch_size * frames, channels, signal_data)
-        x = x.view(batch_size * frames, channels, signal_data)
+        for frame_idx in range(frames):
+            x_frame = x[:, frame_idx]  # (batch_size, channels, signal_data)
+            # Reshape for Conv1D: (batch_size * frames, channels, signal_data)
+            # x = x.view(batch_size * frames, channels, signal_data)
 
-        # Apply Conv1D layers
-        x = self.conv1(x)
-        x = self.silu(x)
+            # Apply Conv1D layers
+            x_frame = self.conv1(x_frame)
+            x_frame = self.silu(x_frame)
 
-        x = self.conv2(x)
-        x = self.silu(x)
+            x_frame = self.conv2(x_frame)
+            x_frame = self.silu(x_frame)
 
-        # Flatten and apply the fully connected layer to get the desired h and w
-        x = x.view(batch_size * frames, -1)  # Flatten the conv output
-        x = self.fc(x)
-        x = self.silu(x)
+            # Flatten and apply the fully connected layer to get the desired h and w
+            x_frame = x_frame.view(batch_size, -1)  # Flatten the conv output
+            x_frame = self.fc(x_frame)
+            x_frame = self.silu(x_frame)
 
-        x = self.fc2(x)
+            frame_outputs.append(x_frame)
+        frame_outputs = torch.stack(frame_outputs)
+        print(frame_outputs.size())
+        frame_outputs = self.fc2(frame_outputs)
         # x = x.view(batch_size, -1)  # Flatten the conv output
         # torch.Size([2, 1600]) 8 8 25
         # x = self.fc2(x)
 
         # Reshape to (batch_size, frames, 1, h, w)
-        x = x.view(batch_size, frames, self.output_dim, self.target_h, self.target_w)
+        frame_outputs = frame_outputs.view(batch_size, frames, self.output_dim, self.target_h, self.target_w)
 
-        return x
+        return frame_outputs
 
 
 class CompactSignalEncoder3_2(nn.Module):

@@ -72,9 +72,9 @@ class PreProcessVideos:
         return {
             "video_path": video_path,
             "camera_pose_path": video_path.replace("output.mp4", "camera_pose.npy"),
-            "tx_path": signal_path.replace("frame1.pt", "tx.txt"),
+            "tx_path": signal_path.replace("channels.pt", "tx.txt"),
             "signal_path": signal_path,
-            "initial_signal_path": signal_path.replace("frame1.pt", "frame1_init.pt"),
+            "initial_signal_path": signal_path.replace("channels.pt", "initial_channels.pt"),
             "num_frames": num_frames,
             "data": []
         }
@@ -212,8 +212,8 @@ class PreProcessVideos:
                 print(f"Frames are all same for {video_path}.")
                 continue
 
-            signal_path = video_path.replace("locomotion_video_000", "locomotion_signal_2to6_agg").replace("output.mp4",
-                                                                                                           "frame1.pt")
+            signal_path = video_path.replace("locomotion_video_000", "locomotion_signal_2to6_multi").replace("output.mp4",
+                                                                                                           "channels.pt")
 
             camera_pose_path = video_path.replace("output.mp4", "camera_pose.npy")
 
