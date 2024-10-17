@@ -394,20 +394,20 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         if needs_upcasting:
             self.vae.to(dtype=torch.float32)
         # print("image2", image.size())  # image2 torch.Size([5, 3, 64, 64])
-        image_latents = self._encode_vae_image(image, device, num_videos_per_prompt, False)
+        image_latents = self._encode_vae_image(image, device, num_videos_per_prompt, False) * self.vae_scale_factor
         image_latents = image_latents.to(dtype)
         image_latents = rearrange(image_latents, '(b f) c h w-> b f c h w', b=batch_size).to(dtype)
         negative_image_latents = torch.zeros_like(image_latents)
         image_latents = torch.cat([negative_image_latents, image_latents])
-        condition_latent = image_latents.repeat(1, num_frames, 1, 1, 1)
+        condition_latent = image_latents.repeat(1, num_frames, 1, 1, 1) / self.vae_scale_factor
 
-        image = video[1:n_input_frames]
+        image = video[0:n_input_frames]
         image = self.image_processor.preprocess(image, height=height, width=width)
         # print("image2", image.size())  # image2 torch.Size([5, 3, 64, 64])
-        image_latents = self._encode_vae_image(image, device, num_videos_per_prompt, False)
+        image_latents = self._encode_vae_image(image, device, num_videos_per_prompt, False) * self.vae_scale_factor
         image_latents = image_latents.to(dtype)
         image_latents = rearrange(image_latents, '(b f) c h w-> b f c h w', b=batch_size).to(dtype)
-        image_latents = image_pool(image_latents)
+        image_latents = image_pool(image_latents) / self.vae_scale_factor
         images_latent = image_latents.repeat(1, num_frames, 1, 1, 1)
         # mask = repeat(mask, '1 h w -> 2 f 1 h w', f=num_frames)
         # 5. Get Added Time IDs
@@ -472,7 +472,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
 
         # [B, FPS, 512] -> [B * FPS, 512]
         signal_values_reshaped = rearrange(signal_values, 'b (f c) h-> b f c h', c=frame_step)  # [B, FPS, 32]
-        signal_values_reshaped_input = signal_values_reshaped[:, :n_input_frames]
+        signal_values_reshaped_input = signal_values_reshaped[:, :n_input_frames+1]
 
         signal_embeddings = signal_encoder(signal_values_reshaped_input)
         # print("signal_encoder", signal_values_reshaped.size())

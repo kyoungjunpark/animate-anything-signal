@@ -72,9 +72,9 @@ class PreProcessVideos:
         return {
             "video_path": video_path,
             "camera_pose_path": video_path.replace("output.mp4", "camera_pose.npy"),
-            "tx_path": signal_path.replace("channels.pt", "tx.txt"),
+            "tx_path": signal_path.replace("frame1.pt", "tx.txt"),
             "signal_path": signal_path,
-            "initial_signal_path": signal_path.replace("channels.pt", "initial_channels.pt"),
+            "initial_signal_path": signal_path.replace("frame1.pt", "frame1_init.pt"),
             "num_frames": num_frames,
             "data": []
         }
@@ -213,7 +213,7 @@ class PreProcessVideos:
                 continue
 
             signal_path = video_path.replace("locomotion_video_000", "locomotion_signal_2to6_agg").replace("output.mp4",
-                                                                                                           "channels.pt")
+                                                                                                           "frame1.pt")
 
             camera_pose_path = video_path.replace("output.mp4", "camera_pose.npy")
 
@@ -237,7 +237,7 @@ class PreProcessVideos:
                 # numpy_array = channels.numpy()
 
                 # Save the NumPy array as a .npy file
-                # signal_path = signal_path.replace("channels.pt", "channels.npy")
+                # signal_path = signal_path.replace("frame1.pt", "channels.npy")
                 # np.save(signal_path, numpy_array)
 
                 video_config = self.build_video_config(video_path, signal_path, num_frames)

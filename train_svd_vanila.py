@@ -775,7 +775,7 @@ def eval(pipeline, vae_processor, validation_data, out_file, index, forward_t=25
     # prepare inital latents
     initial_latents = None
     for image in sorted(validation_data.prompt_image):
-        image_replaced = image.replace("frame", str(index)+"_frame").replace('.jpg', '.gif')
+        image_replaced = image.replace("frame", str(index) + "_frame").replace('.mp4', '.gif')
         target_file = out_file + image_replaced
         # print(out_file)
         # print(image_replaced)

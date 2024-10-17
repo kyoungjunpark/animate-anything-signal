@@ -127,7 +127,7 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
     image_encoder = CompactImageReduction(input_dim=4, frame_step=frame_step, n_input_frames=n_input_frames, target_h=width // 8, target_w=height // 8)
 
     # for intiial signal
-    # n_input_frames += 1
+    n_input_frames += 1
     fps += 1
     # signal_encoder = FrameToSignalNet(input_size=CHIRP_LEN, n_input_frames=n_input_frames, frame_step=frame_step, output_size=encoder_hidden_dim)
     signal_encoder = FFTConv1DLinearModel(input_size=CHIRP_LEN, frame_step=frame_step, n_input_frames=n_input_frames, target_h=16, target_w=64, out_channel=1)
@@ -514,7 +514,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     signal_values = torch.real(batch['signal_values']).float().half()  # [B, FPS * frame_step, 512]
     # signal_values = signal_values * 1e4
     # signal_values = log_scale_tensor(torch.abs(signal_values) * 1e3)
-    # signal_values = signal_values * 1e3
+    signal_values = signal_values * 1e3
 
     if torch.isnan(signal_values).any():
         print(signal_values)
@@ -529,7 +529,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     signal_values_reshaped = rearrange(signal_values, 'b (f c) h-> b f c h', c=frame_step)  # [B, FPS, 32]
     # print("0.5", signal_values_reshaped.size())  # torch.Size([2, 5, 3, 512])
     # print("signal_values_reshaped", signal_values_reshaped.size())
-    signal_values_reshaped_input = signal_values_reshaped[:, :n_input_frames]
+    signal_values_reshaped_input = signal_values_reshaped[:, :n_input_frames+1]
 
     signal_embeddings = signal_encoder(signal_values_reshaped_input)
     signal_embeddings = signal_embeddings.reshape(bsz, 1, -1)
@@ -981,12 +981,11 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
         initial_signal = torch.real(torch.load(initial_signal, map_location="cuda:0", weights_only=True)).to(dtype).to(device)
         initial_channels = initial_signal.unsqueeze(0)  # Now shape is (1, 512)
 
-        # result_signal = torch.cat((initial_channels, signal), dim=0)  # Result shape will be (53, 512)
-        result_signal = signal - initial_channels
-
+        result_signal = torch.cat((initial_channels, signal), dim=0)  # Result shape will be (53, 512)
+        # result_signal = signal - initial_channels
         # result_signal = result_signal * 1e4
         # result_signal = log_scale_tensor(torch.abs(result_signal))
-        # result_signal = result_signal * 1e3
+        result_signal = result_signal * 1e3
         if torch.isnan(result_signal).any():
             print(result_signal)
             result_signal = torch.nan_to_num(result_signal, nan=0.0)
