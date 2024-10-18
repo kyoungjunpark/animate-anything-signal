@@ -194,6 +194,31 @@ class CompactSignalTransformer(nn.Module):
         return x
 
 
+class MultiConv1DLayer(nn.Module):
+    def __init__(self):
+        super(MultiConv1DLayer, self).__init__()
+        # Define multiple Conv1d layers to progressively reduce the third dimension
+        self.conv1 = nn.Conv1d(in_channels=7, out_channels=5, kernel_size=1)  # 7 -> 5
+        self.conv2 = nn.Conv1d(in_channels=5, out_channels=3, kernel_size=1)  # 5 -> 3
+        self.conv3 = nn.Conv1d(in_channels=3, out_channels=1, kernel_size=1)  # 3 -> 1
+
+    def forward(self, x):
+        # x shape: (batch_size, 25, 7, 64, 64)
+        # Permute to (batch_size, 64, 64, 25, 7)
+        x = x.permute(0, 3, 4, 1, 2)
+
+        # Apply the first Conv1d layer
+        x = self.conv1(x)  # (batch_size, 64, 64, 25, 5)
+
+        # Apply the second Conv1d layer
+        x = self.conv2(x)  # (batch_size, 64, 64, 25, 3)
+
+        # Apply the third Conv1d layer
+        x = self.conv3(x)  # (batch_size, 64, 64, 25, 1)
+
+        # Permute back to (batch_size, 25, 1, 64, 64)
+        x = x.permute(0, 3, 4, 1, 2)
+        return x
 class CompactSignalTransformer2(nn.Module):
     def __init__(self, input_size=512, target_h=1, target_w=1, channel=3, frame_step=2, n_input_frames=5, output_dim=4):
         super(CompactSignalTransformer2, self).__init__()
@@ -461,7 +486,6 @@ class CompactSignalEncoder3(nn.Module):
 
             frame_outputs.append(x_frame)
         frame_outputs = torch.stack(frame_outputs)
-        print(frame_outputs.size())
         frame_outputs = self.fc2(frame_outputs)
         # x = x.view(batch_size, -1)  # Flatten the conv output
         # torch.Size([2, 1600]) 8 8 25
