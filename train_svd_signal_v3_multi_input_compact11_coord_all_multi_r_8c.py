@@ -581,7 +581,8 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     added_time_ids = added_time_ids.to(device)
 
     loss = 0
-    final_input = final_encoder(camera_latent, tx_latent, signal_initial_latent, signal_latent, images_latent)
+    final_input = torch.cat([camera_latent, tx_latent, signal_initial_latent, signal_latent, images_latent], dim=2)
+    final_input = final_encoder(final_input)
     # print(signal_initial_latent.size(), signal_latent.size(), images_latent.size(), input_latents.size())
     # torch.Size([2, 25, 1, 64, 64]) torch.Size([2, 25, 1, 64, 64]) torch.Size([2, 25, 5, 64, 64]) torch.Size([2, 25, 8, 64, 64])
     latent_model_input = torch.cat([final_input, input_latents], dim=2)

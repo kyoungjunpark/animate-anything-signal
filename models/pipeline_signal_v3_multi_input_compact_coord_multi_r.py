@@ -525,7 +525,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
             [encoder_hidden_states] * 2) if do_classifier_free_guidance else encoder_hidden_states
 
         encoder_hidden_states = encoder_hidden_states.repeat_interleave(repeats=num_frames, dim=0)
-        final_input = final_encoder(camera_latent, tx_latent, signal_initial_latent, signal_latent, images_latent)
+        final_input = final_encoder(torch.cat([camera_latent, tx_latent, signal_initial_latent, signal_latent, images_latent], dim=2))
         # 8. Denoising loop
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         self._num_timesteps = len(timesteps)
