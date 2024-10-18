@@ -271,7 +271,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
             camera_fourier=None,
             tx_fourier=None,
             img1=None,
-            final_encoder=final_encoder
+            final_encoder=None,
     ):
         r"""
         The call function to the pipeline for generation.

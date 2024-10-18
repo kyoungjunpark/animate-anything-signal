@@ -47,7 +47,7 @@ from diffusers.pipelines.stable_video_diffusion.pipeline_stable_video_diffusion 
 from models.layerdiffuse_VAE import LatentSignalEncoder, SignalEncoder, SignalEncoder2, ImageReduction, \
     MultiSignalEncoder, TransformNet, FrameToSignalNet, SignalTransformer, CompactSignalEncoder2, \
     CompactSignalTransformer, CompactImageReduction, CompactSignalEncoder3, FFTConv1DLinearModel, \
-    CompactSignalTransformer2, Conv1DLayer, MultiConv1DLayer
+    CompactSignalTransformer2, MultiConv1DLayer
 # from models.pipeline_stable_video_diffusion import StableVideoDiffusionPipeline
 from utils.dataset import get_train_dataset, extend_datasets, normalize_input
 from einops import rearrange, repeat

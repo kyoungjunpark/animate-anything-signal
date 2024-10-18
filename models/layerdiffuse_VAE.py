@@ -219,6 +219,8 @@ class MultiConv1DLayer(nn.Module):
         # Permute back to (batch_size, 25, 1, 64, 64)
         x = x.permute(0, 3, 4, 1, 2)
         return x
+
+
 class CompactSignalTransformer2(nn.Module):
     def __init__(self, input_size=512, target_h=1, target_w=1, channel=3, frame_step=2, n_input_frames=5, output_dim=4):
         super(CompactSignalTransformer2, self).__init__()
