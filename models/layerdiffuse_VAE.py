@@ -197,27 +197,18 @@ class CompactSignalTransformer(nn.Module):
 class MultiConv1DLayer(nn.Module):
     def __init__(self):
         super(MultiConv1DLayer, self).__init__()
-        # Define multiple Conv1d layers to progressively reduce the third dimension
-        self.conv1 = nn.Conv1d(in_channels=7, out_channels=5, kernel_size=1)  # 7 -> 5
-        self.conv2 = nn.Conv1d(in_channels=5, out_channels=3, kernel_size=1)  # 5 -> 3
-        self.conv3 = nn.Conv1d(in_channels=3, out_channels=1, kernel_size=1)  # 3 -> 1
+        self.conv1 = nn.Conv2d(in_channels=11, out_channels=32, kernel_size=3, padding=1)  # Output: [2, 25, 32, 64, 64]
+        self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1)  # Output: [2, 25, 64, 64, 64]
+        self.conv3 = nn.Conv2d(in_channels=64, out_channels=1, kernel_size=3, padding=1)  # Output: [2, 25, 1, 64, 64]
 
     def forward(self, x):
-        # x shape: (batch_size, 25, 7, 64, 64)
-        # Permute to (batch_size, 64, 64, 25, 7)
-        x = x.permute(0, 3, 4, 1, 2)
+        x = x.permute(0, 1, 3, 4, 2)  # Change to [2, 25, 64, 64, 11]
+        x = x.reshape(-1, 11, 64, 64)  # Change to [50, 11, 64, 64]
+        x = self.conv1(x)  # [2, 25, 32, 64, 64]
+        x = self.conv2(x)  # [2, 25, 64, 64, 64]
+        x = self.conv3(x)  # [2, 25, 1, 64, 64]
+        x = x.view(2, 25, 1, 64, 64)  # Reshape back to [2, 25, 1, 64, 64]
 
-        # Apply the first Conv1d layer
-        x = self.conv1(x)  # (batch_size, 64, 64, 25, 5)
-
-        # Apply the second Conv1d layer
-        x = self.conv2(x)  # (batch_size, 64, 64, 25, 3)
-
-        # Apply the third Conv1d layer
-        x = self.conv3(x)  # (batch_size, 64, 64, 25, 1)
-
-        # Permute back to (batch_size, 25, 1, 64, 64)
-        x = x.permute(0, 3, 4, 1, 2)
         return x
 
 

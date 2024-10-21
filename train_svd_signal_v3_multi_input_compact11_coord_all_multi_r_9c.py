@@ -20,6 +20,7 @@ import torchvision.transforms as T
 import torch.nn as nn
 import diffusers
 import transformers
+import torchvision.transforms as transforms
 
 from tqdm.auto import tqdm
 from PIL import Image
@@ -391,6 +392,7 @@ def save_pipe(
         camera_fourier,
         tx_fourier,
         img1,
+        final_encoder,
         output_dir,
         is_checkpoint=False,
         save_pretrained_model=True
@@ -413,6 +415,7 @@ def save_pipe(
 
     camera_fourier_out = copy.deepcopy(camera_fourier)
     tx_fourier_out = copy.deepcopy(tx_fourier)
+    final_encoder_out = copy.deepcopy(final_encoder)
 
     if save_pretrained_model:
         pipeline.save_pretrained(save_path)
@@ -425,12 +428,13 @@ def save_pipe(
 
         torch.save(camera_fourier_out.state_dict(), signal_save_path + 'camera_fourier.pth')
         torch.save(tx_fourier_out.state_dict(), signal_save_path + 'tx_fourier.pth')
+        torch.save(final_encoder_out.state_dict(), signal_save_path + 'final_encoder.pth')
 
     logger.info(f"Saved model at {save_path} on step {global_step}")
 
     del pipeline
     del unet_out
-    del sig1_out, sig2_out, sig3_out, img1_out,
+    del sig1_out, sig2_out, sig3_out, img1_out, camera_fourier_out, tx_fourier_out, final_encoder_out
     torch.cuda.empty_cache()
     gc.collect()
 
@@ -917,7 +921,6 @@ def main(
             accelerator.unwrap_model(tx_fourier),
             accelerator.unwrap_model(img1),
             accelerator.unwrap_model(final_encoder),
-
             output_dir,
             is_checkpoint=False,
             save_pretrained_model=save_pretrained_model
@@ -1063,6 +1066,8 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
 def main_eval(
         pretrained_model_path: str,
         validation_data: Dict,
+        train_data: Dict,
+        dataset_types: Tuple[str] = 'json',
         seed: Optional[int] = None,
         eval_file=None,
         **kwargs
@@ -1070,28 +1075,31 @@ def main_eval(
     if seed is not None:
         set_seed(seed)
     # Load scheduler, tokenizer and models.
-    pipeline, tokenizer, feature_extractor, train_scheduler, vae_processor, text_encoder, vae, unet = load_primary_models(
-        pretrained_model_path, eval=True)
+    pipeline, tokenizer, feature_extractor, train_scheduler, vae_processor, text_encoder, vae, unet, sig1, sig2, \
+    sig3, camera_fourier, tx_fourier, img1 = load_primary_models(
+        pretrained_model_path, validation_data.n_sample_frames, validation_data.frame_step, validation_data.n_input_frames,
+        validation_data.width, validation_data.height, eval=True)
+
     device = torch.device("cuda")
     pipeline.to(device)
 
-    if eval_file is not None:
-        eval_list = json.load(open(eval_file))
-    else:
-        eval_list = [[validation_data.prompt_image, validation_data.prompt]]
-
     output_dir = "output/svd_signal_v3_compact"
-    iters = 5
-    for example in eval_list:
-        for t in range(iters):
-            name, prompt = example
-            out_file_dir = f"{output_dir}/{name.split('.')[0]}"
-            os.makedirs(out_file_dir, exist_ok=True)
-            out_file = f"{out_file_dir}/{t}.gif"
-            validation_data.prompt_image = name
-            validation_data.prompt = prompt
-            eval(pipeline, vae_processor, validation_data, out_file, t)
-            print("save file", out_file)
+
+    out_file = f"{output_dir}/samples/"
+
+    train_datasets = get_train_dataset(dataset_types, train_data, tokenizer)
+    train_dataset = train_datasets[0]
+    print(train_dataset)
+    train_dataloader = torch.utils.data.DataLoader(
+        train_dataset,
+        batch_size=1,
+    )
+    for step, batch in enumerate(train_dataloader):
+        pixel_values = batch['pixel_values']
+
+        eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, validation_data, out_file,
+             None)
+    print("save file", out_file)
 
 
 if __name__ == "__main__":
