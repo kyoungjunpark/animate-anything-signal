@@ -2,6 +2,7 @@ accelerate
 # torch==2.0.0
 torch
 torchvision
+torchaudio
 diffusers==0.24.0
 transformers==4.36.2
 einops
@@ -19,9 +20,11 @@ gradio
 httpx[socks]
 numpy==1.26.4
 deepspeed
+scipy==1.9.3
 azure-core
 isodate
 wandb
 cffi
 moviepy
 imageio
+torcheval

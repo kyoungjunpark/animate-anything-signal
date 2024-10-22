@@ -477,20 +477,17 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         # [B, FPS, 512] -> [B * FPS, 512]
         # signal_values_reshaped = rearrange(signal_values, 'b (f c) h-> b f c h', c=frame_step)  # [B, FPS, 32]
         signal_values_reshaped = rearrange(signal_values, 'b (f c) h r-> b f c (h r)', c=frame_step)  # [B, FPS, 32]
-        print("signal_values_reshaped", signal_values_reshaped.size()) # signal_values_reshaped torch.Size([1, 25, 3, 2048])
         init_signals = signal_values_reshaped[:, 0].unsqueeze(1)
         # (2,25,3,512*4) - (2,512*4)
         deducted_signal = signal_values_reshaped[:, 1:] - init_signals
 
         signal_values_reshaped_input = signal_values_reshaped[:, :n_input_frames+1]
-        print(signal_values_reshaped_input.size())
         # torch.Size([1, 11, 3, 2060])
 
         signal_embeddings = signal_encoder(signal_values_reshaped_input)
         # print("signal_encoder", signal_values_reshaped.size())
 
         signal_embeddings = signal_embeddings.reshape(batch_size, 1, -1)
-        print(deducted_signal.size())
         signal_embeddings2 = signal_encoder2(deducted_signal)
 
         # encoder_hidden_states = torch.cat((image_embeddings, signal_embeddings), dim=2)
@@ -504,7 +501,6 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
 
         camera_latent = camera_fourier(camera_pose)
         tx_latent = tx_fourier(tx_pos)
-
 
         # here for intiial signal embedding
         signal_initial_latent = signal_encoder3(signal_values_reshaped_input)
@@ -572,6 +568,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
                 self.vae.to(dtype=torch.float16)
             frames = self.decode_latents(latents, num_frames, decode_chunk_size)
             frames = svd_tensor2vid(frames, self.image_processor, output_type=output_type)
+
         else:
             frames = latents
 

@@ -179,7 +179,6 @@ class CompactSignalTransformer(nn.Module):
         # Input: (batch, frames, channels, signal) = [2, 5, 3, 512]
 
         batch_size, frames, channels, signal = x.shape
-        print(x.shape)
         # Step 1: Reshape the signal (512) into (64, 64) spatial dimensions
         x = x.view(batch_size, frames, channels, -1)  # [2, 5, 3, 512]
         x = self.fc_signal_to_spatial(x)  # [2, 5, 3, 4096]
@@ -195,19 +194,23 @@ class CompactSignalTransformer(nn.Module):
 
 
 class MultiConv1DLayer(nn.Module):
-    def __init__(self):
+    def __init__(self, target_h=1, target_w=1):
         super(MultiConv1DLayer, self).__init__()
+        self.target_w = target_w
+        self.target_h = target_h
         self.conv1 = nn.Conv2d(in_channels=11, out_channels=32, kernel_size=3, padding=1)  # Output: [2, 25, 32, 64, 64]
         self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1)  # Output: [2, 25, 64, 64, 64]
         self.conv3 = nn.Conv2d(in_channels=64, out_channels=1, kernel_size=3, padding=1)  # Output: [2, 25, 1, 64, 64]
 
     def forward(self, x):
+        batch_size, frames, channels, width, height = x.shape
+
         x = x.permute(0, 1, 3, 4, 2)  # Change to [2, 25, 64, 64, 11]
-        x = x.reshape(-1, 11, 64, 64)  # Change to [50, 11, 64, 64]
+        x = x.reshape((batch_size * frames), channels, width, height)  # Change to [50, 11, 64, 64]
         x = self.conv1(x)  # [2, 25, 32, 64, 64]
         x = self.conv2(x)  # [2, 25, 64, 64, 64]
         x = self.conv3(x)  # [2, 25, 1, 64, 64]
-        x = x.view(2, 25, 1, 64, 64)  # Reshape back to [2, 25, 1, 64, 64]
+        x = x.view(batch_size, frames, 1, width, height)  # Reshape back to [2, 25, 1, 64, 64]
 
         return x
 
@@ -457,7 +460,6 @@ class CompactSignalEncoder3(nn.Module):
 
     def forward(self, x):
         batch_size, frames, channels, signal_data = x.shape
-        print(x.shape)
         frame_outputs = []
 
         for frame_idx in range(frames):

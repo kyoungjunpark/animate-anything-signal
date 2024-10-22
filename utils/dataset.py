@@ -536,6 +536,7 @@ class VideoBLIPDataset_V2(Dataset):
             "prompt_ids": prompt_ids,
             "text_prompt": prompt,
             "frame_step": frame_step,
+            "pixel_values_path": clip_path,
             'dataset': self.__getname__(),
         }
         # mask = np.array(0)
