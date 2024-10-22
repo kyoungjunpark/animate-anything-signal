@@ -28,3 +28,4 @@ cffi
 moviepy
 imageio
 torcheval
+huggingface_hub==0.21.1

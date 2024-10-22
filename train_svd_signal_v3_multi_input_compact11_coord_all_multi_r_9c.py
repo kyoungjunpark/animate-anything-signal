@@ -22,7 +22,6 @@ import diffusers
 import transformers
 import torchvision.transforms as transforms
 # from utils.frechet_video_distance import frechet_video_distance as fvd
-import torch_fidelity
 from common_metrics_on_video_quality.calculate_fvd import calculate_fvd
 from torcheval.metrics import FrechetInceptionDistance
 
@@ -807,7 +806,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("test")
+        accelerator.init_trackers("c9_multi_r_10%empty")
         wandb.require("core")
 
     # Train!
