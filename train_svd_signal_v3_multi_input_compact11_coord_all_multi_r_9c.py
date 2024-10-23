@@ -806,7 +806,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("c9_multi_r_0.1empty_metrics")
+        accelerator.init_trackers("c9_multi_0.1empty_metrics")
         wandb.require("core")
 
     # Train!

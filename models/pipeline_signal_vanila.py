@@ -464,21 +464,6 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         # shift  for initial signal,
         # frame_range_indices = [x + 1 for x in frame_range_indices]
         # print(signal_values.unsqueeze(0).size())
-        signal_values = load_channel2(signal_values, frame_step, frame_range_indices)
-        signal_values = signal_values.unsqueeze(0)
-
-        # bsz = signal_values.size(0)
-        # fps = signal_values.size(1)
-
-        # [B, FPS, 512] -> [B * FPS, 512]
-        signal_values_reshaped = rearrange(signal_values, 'b (f c) h-> b f c h', c=frame_step)  # [B, FPS, 32]
-        signal_values_reshaped_input = signal_values_reshaped[:, :n_input_frames]
-
-        signal_embeddings = signal_encoder(signal_values_reshaped_input)
-        # print("signal_encoder", signal_values_reshaped.size())
-
-        signal_embeddings = signal_embeddings.reshape(batch_size, 1, -1)
-        signal_embeddings2 = signal_encoder2(signal_values_reshaped)
 
         # encoder_hidden_states = torch.cat((image_embeddings, signal_embeddings), dim=2)
         # encoder_hidden_states = signal_embeddings.to(dtype)
@@ -486,34 +471,10 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
 
         encoder_hidden_states = image_latent
 
-        signal_latent = signal_embeddings2.to(dtype)
-
-        # Fourier
-        camera_pose = camera_pose.unsqueeze(0)
-        tx_pos = tx_pos.unsqueeze(0)
-
-        camera_latent = camera_fourier(camera_pose)
-        tx_latent = tx_fourier(tx_pos)
-        merged = torch.cat((camera_latent, tx_latent), dim=-1)
-        pos_latent = torch.cat((merged, merged), dim=-2)
-        pos_latent = pos_latent.repeat(1, num_frames, 1, 1, 1)  # condition_latent torch.Size([1, 50, 20, 8, 8])
-
-        # pos_latent = torch.cat((camera_latent, tx_latent), dim=3)
-
-        # here for intiial signal embedding
-        signal_initial_latent = signal_encoder3(signal_values_reshaped_input)
-        signal_initial_latent = signal_initial_latent.repeat(1, num_frames, 1, 1,
-                                                             1).to(dtype)
-        signal_latent = torch.cat([signal_latent] * 2) if do_classifier_free_guidance else signal_latent
-        # condition_latent = torch.cat([condition_latent] * 2) if do_classifier_free_guidance else condition_latent
-
-        # image_latent = torch.cat([image_latent] * 2) if do_classifier_free_guidance else image_latent
-        signal_initial_latent = torch.cat([signal_initial_latent] * 2) if do_classifier_free_guidance else signal_initial_latent
         images_latent = torch.cat([images_latent] * 2) if do_classifier_free_guidance else images_latent
 
         # pos_latent = torch.cat([pos_latent] * 2) if do_classifier_free_guidance else pos_latent
         # camera_latent = torch.cat([camera_latent] * 2) if do_classifier_free_guidance else camera_latent
-        pos_latent = torch.cat([pos_latent] * 2) if do_classifier_free_guidance else pos_latent
         encoder_hidden_states = torch.cat(
             [encoder_hidden_states] * 2) if do_classifier_free_guidance else encoder_hidden_states
 

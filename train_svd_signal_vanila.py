@@ -534,7 +534,6 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     if random.random() < 0.15:
         encoder_hidden_states = uncond_hidden_states
 
-
     encoder_hidden_states = encoder_hidden_states.repeat_interleave(repeats=num_frames, dim=0)
 
     # Add noise to the latents according to the noise magnitude at each timestep
@@ -875,7 +874,7 @@ def main(
                         save_filename = f"{global_step}_dataset-{curr_dataset_name}"
                         out_file = f"{output_dir}/samples/"
                         if global_step % 10000 == 0 or global_step == 5:
-                            fid, fvd, fvd_avg, psnr = eval_fid_fvd(test_dataloader, pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, final_encoder, validation_data, out_file, global_step)
+                            fid, fvd, fvd_avg, psnr = eval_fid_fvd(test_dataloader, pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, validation_data, out_file, global_step)
                             accelerator.log({"fid": fid.detach().item()}, step=step)
                             accelerator.log({"fvd": fvd}, step=step)
                             accelerator.log({"fvd (avg)": fvd_avg}, step=step)
@@ -1048,7 +1047,7 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
     return 0
 
 
-def eval_fid_fvd(test_dataloader, pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, final_encoder, validation_data, out_file, index, forward_t=25, preview=True):
+def eval_fid_fvd(test_dataloader, pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, validation_data, out_file, index, forward_t=25, preview=True):
     vae = pipeline.vae
     device = vae.device
     dtype = vae.dtype
@@ -1129,7 +1128,6 @@ def eval_fid_fvd(test_dataloader, pipeline, vae_processor, sig1, sig2, sig3, cam
                 sig3=sig3,
                 camera_fourier=camera_fourier,
                 tx_fourier=tx_fourier,
-                final_encoder=final_encoder,
                 img1=img1,
             ).frames[0]
 

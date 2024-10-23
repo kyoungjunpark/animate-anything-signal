@@ -216,9 +216,19 @@ class PreProcessVideos:
                                                                                                            "channels.pt")
 
             camera_pose_path = video_path.replace("output.mp4", "camera_pose.npy")
+            tx_path = signal_path.replace("channels.pt", "tx.txt")
 
-            if not os.path.exists(camera_pose_path):
-                print(f"No camera_pose_path {camera_pose_path}")
+            if not os.path.exists(camera_pose_path) or not os.path.exists(tx_path):
+                print(f"No camera or tx {camera_pose_path}")
+                continue
+
+            camera_pose = np.load(camera_pose_path)
+
+            tx_pos = np.loadtxt(tx_path)
+
+            if len(camera_pose) != 4 or len(tx_pos) != 3:
+                print(len(camera_pose), len(tx_pos))
+                print(camera_pose, tx_pos)
                 continue
 
             if not os.path.exists(signal_path):
