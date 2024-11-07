@@ -561,6 +561,10 @@ class VideoBLIPDataset_V2(Dataset):
         example = self.train_data_sig_agg_batch(index)
         return example
 
+    def remove(self, index):
+        self.train_data.remove(index)
+        return self.train_data
+
 
 class SingleVideoDataset(Dataset):
     def __init__(

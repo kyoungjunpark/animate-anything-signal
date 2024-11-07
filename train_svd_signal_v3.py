@@ -914,7 +914,7 @@ def eval(pipeline, vae_processor, sig1, sig2, validation_data, out_file, index, 
             # resized_frames = [np.array(cv2.resize(frame, (125, 125))) for frame in np.array(video_frames)]
             # resized_frames = np.array(resized_frames)
             wandb.log({image: wandb.Video(target_file.replace('.gif', '.mp4'),
-                                          caption=target_file.replace('.gif', '.mp4'), fps=fps, format="mp4")})
+                                          caption=target_file.replace('.gif', '.mp4'), format="mp4")})
 
     return 0
 

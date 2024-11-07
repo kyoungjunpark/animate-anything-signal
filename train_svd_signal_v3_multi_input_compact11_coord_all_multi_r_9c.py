@@ -60,8 +60,12 @@ from einops import rearrange, repeat
 import imageio
 import wandb
 # from models.unet_3d_condition import UNet3DConditionModel
+from fastdtw import fastdtw
+from scipy.spatial.distance import euclidean
 
 from models.pipeline_signal_v3_multi_input_compact_coord_multi_r import MaskStableVideoDiffusionPipeline
+from utils.pips.demo import run_model
+from utils.pips.nets.pips import Pips
 
 decord.bridge.set_bridge('torch')
 
@@ -767,6 +771,7 @@ def main(
     interval = len(train_dataset) // n
     test_dataset = [train_dataset[i] for i in range(0, len(train_dataset), interval)][:n]
 
+
     # Split the dataset
     test_dataloader = torch.utils.data.DataLoader(
         test_dataset,
@@ -806,7 +811,8 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("c9_multi_0.1empty_metrics")
+        accelerator.init_trackers("c9_0.2empty_lr5e5_metrics")
+        wandb.login(key="a94ace7392048e560ce6962a468101c6f0158b55")
         wandb.require("core")
 
     # Train!
@@ -919,15 +925,16 @@ def main(
                         curr_dataset_name = batch['dataset'][0]
                         save_filename = f"{global_step}_dataset-{curr_dataset_name}"
                         out_file = f"{output_dir}/samples/"
-                        if global_step % 10000 == 0:
-                            fid, fvd, fvd_avg, psnr = eval_fid_fvd(test_dataloader, pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, final_encoder, validation_data, out_file, global_step)
-                            accelerator.log({"fid": fid.detach().item()}, step=step)
-                            accelerator.log({"fvd": fvd}, step=step)
-                            accelerator.log({"fvd (avg)": fvd_avg}, step=step)
-                            accelerator.log({"psnr": psnr}, step=step)
-
                         eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, final_encoder, validation_data, out_file, global_step)
                         logger.info(f"Saved a new sample to {out_file}")
+                        fid, fvd, fvd_avg, psnr = eval_fid_fvd(test_dataloader, pipeline, vae_processor, sig1, sig2,
+                                                               sig3, camera_fourier, tx_fourier, img1, final_encoder,
+                                                               validation_data, out_file, global_step)
+
+                        if global_step > 10000:
+                            fid, fvd, fvd_avg, psnr = eval_fid_fvd(test_dataloader, pipeline, vae_processor, sig1, sig2,
+                                                                   sig3, camera_fourier, tx_fourier, img1, final_encoder,
+                                                                   validation_data, out_file, global_step)
 
             logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
             accelerator.log({"training_loss": loss.detach().item()}, step=step)
@@ -1090,7 +1097,7 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
             # resized_frames = [np.array(cv2.resize(frame, (125, 125))) for frame in np.array(video_frames)]
             # resized_frames = np.array(resized_frames)
             wandb.log({image: wandb.Video(target_file.replace('.gif', '.mp4'),
-                                          caption=target_file.replace('.gif', '.mp4'), fps=fps, format="mp4")})
+                                          caption=target_file.replace('.gif', '.mp4'), format="mp4")})
 
     return 0
 
@@ -1217,34 +1224,13 @@ def eval_fid_fvd(test_dataloader, pipeline, vae_processor, sig1, sig2, sig3, cam
             # Concatenate the original tensor with the repeated elements
             pil_images = torch.cat((pil_images, repeated_elements), dim=0)  # Shape [25, 3, 64, 64]
 
-        # fvd_result = calculate_fvd(pil_images.unsqueeze(0), video_frames.unsqueeze(0), device, method='styleganv')
-        # fvd_result = calculate_fvd(videos1, videos2, device, method='styleganv')
-        # fvd_result2 = calculate_fvd(pil_images, video_frames, device, method='styleganv')
         videos1.append(pil_images)
         videos2.append(video_frames)
-        # print(pil_images)
-        # print(video_frames)
-        # print(fvd_result, fvd_result2)
-        # fvd_results.append(fvd_result)
-        # video_tensor = pil_images.squeeze(0)
 
-        # Convert to NumPy array and change the order of dimensions [frames, channels, height, width] -> [frames, height, width, channels]
-        # video_numpy = video_tensor.permute(0, 2, 3, 1).numpy()
-
-        # Normalize pixel values to the range [0, 255]
-        # video_numpy = (255 * (video_numpy - video_numpy.min()) / (video_numpy.max() - video_numpy.min())).astype(np.uint8)
-
-        # imageio.mimwrite(target_file, video_numpy, fps=fps)
-
-    # NUMBER_OF_VIDEOS = 8
-    # VIDEO_LENGTH = 30
-    # CHANNEL = 3
-    # SIZE = 64
-    # tmp_1 = torch.zeros(NUMBER_OF_VIDEOS, VIDEO_LENGTH, CHANNEL, SIZE, SIZE, requires_grad=False)
-    # tmp_2 = torch.ones(NUMBER_OF_VIDEOS, VIDEO_LENGTH, CHANNEL, SIZE, SIZE, requires_grad=False)
-    # fvd_result = calculate_fvd(tmp_1, tmp_2, device, method='styleganv')
-    videos1 = torch.stack(videos1)  # torch.Size([11, 25, 3, 64, 64]) torch.Size([11, 25, 3, 64, 64])
+    videos1 = torch.stack(videos1)
     videos2 = torch.stack(videos2)
+
+
     # print(videos1.min(), videos2.min(), videos1.max(), videos2.max())
     # print(videos1.size(), videos2.size())
     # fvd_result = calculate_fvd(videos1, videos2, device, method='videogpt')
@@ -1282,7 +1268,52 @@ def eval_fid_fvd(test_dataloader, pipeline, vae_processor, sig1, sig2, sig3, cam
     fid_score = fid.compute()
 
     # fid_results = np.sum(fid_avg) / len(fid_avg)
+    wandb.log({"fid": fid_score})
+    wandb.log({"fvd": fvd_results})
+    wandb.log({"fvd (avg)": fvd_avg})
+    wandb.log({"psnr": psnr_avg})
+
+    eval_optical_flow(videos1, videos2)
     return fid_score, fvd_results, fvd_avg, psnr_avg
+
+
+def eval_optical_flow(real_videos, fake_videos):
+    # # torch.Size([11, 25, 3, 64, 64]) torch.Size([11, 25, 3, 64, 64])
+    model = Pips(stride=4).cuda()
+    parameters = list(model.parameters())
+    global_step = 0
+    model.eval()
+
+    global_step += 1
+    N = 16 ** 2  # number of points to track
+
+    total_distance1 = []
+    with torch.no_grad():
+        for video_idx in range(real_videos.size(0)):
+            real_video = real_videos[video_idx:video_idx]
+            fake_video = fake_videos[video_idx:video_idx]
+
+            # print(trajs_e.size())  # torch.Size([1, 8, 256, 2])
+            trajs_real = run_model(model, real_video, N, None, None) # torch.Size([1, 8, 3, 360, 640])
+            trajs_fake = run_model(model, fake_video, N, None, None)
+
+            for i in range(trajs_real.size(2)):  # 256 dimension (index 2)
+                slice_real = trajs_real[0, :, i, :]
+                slice_fake = trajs_fake[0, :, i, :]
+
+                slice_real = slice_real.cpu().numpy()
+                slice_fake = slice_fake.cpu().numpy()
+
+                distance, path = fastdtw(slice_real, slice_fake, dist=euclidean)
+                total_distance1.append(distance)
+
+                 #distance2, path = fastdtw(slice_real, slice_fake2, dist=euclidean)
+                # total_distance2.append(distance2)
+
+    # fid_results = np.sum(fid_avg) / len(fid_avg)
+    wandb.log({"optical flow": np.mean(total_distance1) / N})
+
+    return np.mean(total_distance1) / N
 
 
 def decode_latents(latents, vae, num_frames, decode_chunk_size=14):

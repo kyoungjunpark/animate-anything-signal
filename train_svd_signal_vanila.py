@@ -725,6 +725,7 @@ def main(
     interval = len(train_dataset) // n
     test_dataset = [train_dataset[i] for i in range(0, len(train_dataset), interval)][:n]
 
+
     # Split the dataset
     test_dataloader = torch.utils.data.DataLoader(
         test_dataset,
@@ -764,7 +765,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("vanila_empty0.1_metrics")
+        accelerator.init_trackers("vanila_empty0.2_metrics_strong222")
         wandb.login(key="a94ace7392048e560ce6962a468101c6f0158b55")
         wandb.require("core")
 
@@ -873,15 +874,12 @@ def main(
                         curr_dataset_name = batch['dataset'][0]
                         save_filename = f"{global_step}_dataset-{curr_dataset_name}"
                         out_file = f"{output_dir}/samples/"
-                        if global_step % 10000 == 0 or global_step == 5:
-                            fid, fvd, fvd_avg, psnr = eval_fid_fvd(test_dataloader, pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, validation_data, out_file, global_step)
-                            accelerator.log({"fid": fid.detach().item()}, step=step)
-                            accelerator.log({"fvd": fvd}, step=step)
-                            accelerator.log({"fvd (avg)": fvd_avg}, step=step)
-                            accelerator.log({"psnr": psnr}, step=step)
-
                         eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, validation_data, out_file, global_step)
                         logger.info(f"Saved a new sample to {out_file}")
+                        if global_step > 10000:
+                            fid, fvd, fvd_avg, psnr = eval_fid_fvd(test_dataloader, pipeline, vae_processor, sig1, sig2,
+                                                                   sig3, camera_fourier, tx_fourier, img1,
+                                                                   validation_data, out_file, global_step)
 
             logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
             accelerator.log({"training_loss": loss.detach().item()}, step=step)
@@ -1042,7 +1040,7 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
             # resized_frames = [np.array(cv2.resize(frame, (125, 125))) for frame in np.array(video_frames)]
             # resized_frames = np.array(resized_frames)
             wandb.log({image: wandb.Video(target_file.replace('.gif', '.mp4'),
-                                          caption=target_file.replace('.gif', '.mp4'), fps=fps, format="mp4")})
+                                          caption=target_file.replace('.gif', '.mp4'), format="mp4")})
 
     return 0
 
@@ -1193,7 +1191,6 @@ def eval_fid_fvd(test_dataloader, pipeline, vae_processor, sig1, sig2, sig3, cam
     # SIZE = 64
     # tmp_1 = torch.zeros(NUMBER_OF_VIDEOS, VIDEO_LENGTH, CHANNEL, SIZE, SIZE, requires_grad=False)
     # tmp_2 = torch.ones(NUMBER_OF_VIDEOS, VIDEO_LENGTH, CHANNEL, SIZE, SIZE, requires_grad=False)
-    # fvd_result = calculate_fvd(tmp_1, tmp_2, device, method='styleganv')
     videos1 = torch.stack(videos1)  # torch.Size([11, 25, 3, 64, 64]) torch.Size([11, 25, 3, 64, 64])
     videos2 = torch.stack(videos2)
     # print(videos1.min(), videos2.min(), videos1.max(), videos2.max())
@@ -1233,6 +1230,11 @@ def eval_fid_fvd(test_dataloader, pipeline, vae_processor, sig1, sig2, sig3, cam
     fid_score = fid.compute()
 
     # fid_results = np.sum(fid_avg) / len(fid_avg)
+    wandb.log({"fid": fid_score})
+    wandb.log({"fvd": fvd_results})
+    wandb.log({"fvd (avg)": fvd_avg})
+    wandb.log({"psnr": psnr_avg})
+
     return fid_score, fvd_results, fvd_avg, psnr_avg
 
 

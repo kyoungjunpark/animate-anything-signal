@@ -26,8 +26,13 @@ azure-core
 isodate
 wandb
 cffi
-moviepy
-imageio
 torcheval
 huggingface_hub==0.21.1
-scipy
+tensorboardX
+scikit-learn
+matplotlib
+protobuf
+fire
+moviepy
+fastdtw
+dtaidistance
