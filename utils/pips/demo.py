@@ -4,13 +4,13 @@ import io
 import os
 from PIL import Image
 import cv2
-import saverloader
+from utils.pips import saverloader
 import imageio.v2 as imageio
-from nets.pips import Pips
-import utils.improc
+from utils.pips.nets.pips import Pips
+from utils.pips.utils.improc import preprocess_color
 import random
 import glob
-from utils.basic import print_, print_stats
+from utils.pips.utils.basic import print_, print_stats, meshgrid2d
 import torch
 from tensorboardX import SummaryWriter
 import torch.nn.functional as F
@@ -34,7 +34,7 @@ def run_model(model, rgbs, N, sw, gif_name):
 
     # pick N points to track; we'll use a uniform grid
     N_ = np.sqrt(N).round().astype(np.int32)
-    grid_y, grid_x = utils.basic.meshgrid2d(B, N_, N_, stack=False, norm=False, device='cuda')
+    grid_y, grid_x = meshgrid2d(B, N_, N_, stack=False, norm=False, device='cuda')
     grid_y = 8 + grid_y.reshape(B, -1) / float(N_ - 1) * (H - 16)
     grid_x = 8 + grid_x.reshape(B, -1) / float(N_ - 1) * (W - 16)
     xy = torch.stack([grid_x, grid_y], dim=-1)  # B, N_*N_, 2
@@ -49,16 +49,16 @@ def run_model(model, rgbs, N, sw, gif_name):
     rgbs = F.pad(rgbs.reshape(B * S, 3, H, W), (pad, pad, pad, pad), 'constant', 0).reshape(B, S, 3, H + pad * 2,
                                                                                             W + pad * 2)
     trajs_e = trajs_e + pad
-    print(trajs_e.size())  # torch.Size([1, 8, 256, 2])
+    # print(trajs_e.size())  # torch.Size([1, 8, 256, 2])
     # B,S,N,2, where, S is the sequence length and N is the number of particles, and 2 is the x and y coordinates.
     # exit(1)
     if sw is not None and sw.save_this:
         linewidth = 2
 
         # visualize the input
-        o1 = sw.summ_rgbs('inputs/rgbs', utils.improc.preprocess_color(rgbs[0:1]).unbind(1))
+        o1 = sw.summ_rgbs('inputs/rgbs', preprocess_color(rgbs[0:1]).unbind(1))
         # visualize the trajs overlaid on the rgbs
-        o2 = sw.summ_traj2ds_on_rgbs('outputs/trajs_on_rgbs', trajs_e[0:1], utils.improc.preprocess_color(rgbs[0:1]),
+        o2 = sw.summ_traj2ds_on_rgbs('outputs/trajs_on_rgbs', trajs_e[0:1], preprocess_color(rgbs[0:1]),
                                      cmap='spring', linewidth=linewidth)
         # visualize the trajs alone
         o3 = sw.summ_traj2ds_on_rgbs('outputs/trajs_on_black', trajs_e[0:1], torch.ones_like(rgbs[0:1]) * -0.5,
@@ -77,14 +77,14 @@ def run_model(model, rgbs, N, sw, gif_name):
 
         # alternate vis
         sw.summ_traj2ds_on_rgbs2('outputs/trajs_on_rgbs2', trajs_e[0:1], vis_e[0:1],
-                                 utils.improc.preprocess_color(rgbs[0:1]))
+                                 preprocess_color(rgbs[0:1]))
 
         # animation of inference iterations
         rgb_vis = []
         for trajs_e_ in preds_anim:
             trajs_e_ = trajs_e_ + pad
             rgb_vis.append(
-                sw.summ_traj2ds_on_rgb('', trajs_e_[0:1], torch.mean(utils.improc.preprocess_color(rgbs[0:1]), dim=1),
+                sw.summ_traj2ds_on_rgb('', trajs_e_[0:1], torch.mean(preprocess_color(rgbs[0:1]), dim=1),
                                        cmap='spring', linewidth=linewidth, only_return=True))
         sw.summ_rgbs('outputs/animated_trajs_on_rgb', rgb_vis)
 

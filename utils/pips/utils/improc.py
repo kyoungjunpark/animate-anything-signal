@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-import utils.basic
+from utils.pips.utils import basic
 from sklearn.decomposition import PCA
 from matplotlib import cm
 import matplotlib.pyplot as plt
@@ -98,7 +98,7 @@ def reduce_emb(emb, valid=None, inbound=None, together=False):
     else:
         reduced_emb = pca_embed(emb, keep, valid) #not im
 
-    reduced_emb = utils.basic.normalize(reduced_emb) - 0.5
+    reduced_emb = basic.normalize(reduced_emb) - 0.5
     if inbound is not None:
         emb_inbound = emb*inbound
     else:
@@ -167,7 +167,7 @@ def xy2heatmap(xy, sigma, grid_xs, grid_ys, norm=False):
     if norm:
         # normalize so each gaussian peaks at 1
         gauss_ = gauss.reshape(B*N, Y, X)
-        gauss_ = utils.basic.normalize(gauss_)
+        gauss_ = basic.normalize(gauss_)
         gauss = gauss_.reshape(B, N, Y, X)
 
     return gauss
@@ -180,7 +180,7 @@ def xy2heatmaps(xy, Y, X, sigma=30.0):
 
     device = xy.device
     
-    grid_y, grid_x = utils.basic.meshgrid2d(B, Y, X, device=device)
+    grid_y, grid_x = basic.meshgrid2d(B, Y, X, device=device)
     # grid_x and grid_y are B x Y x X
     grid_xs = grid_x.unsqueeze(1).repeat(1, N, 1, 1)
     grid_ys = grid_y.unsqueeze(1).repeat(1, N, 1, 1)
@@ -278,7 +278,7 @@ def oned2inferno(d, norm=True):
     assert(C==1)
 
     if norm:
-        d = utils.basic.normalize(d)
+        d = basic.normalize(d)
         
     rgb = torch.zeros(B, 3, H, W)
     for b in list(range(B)):
@@ -299,7 +299,7 @@ def draw_frame_id_on_vis(vis, frame_id, scale=0.5, left=5, top=20):
     color = (255, 255, 255)
     # print('putting frame id', frame_id)
 
-    frame_str = utils.basic.strnum(frame_id)
+    frame_str = basic.strnum(frame_id)
     
     cv2.putText(
         rgb,
@@ -513,7 +513,7 @@ class Summ_writer(object):
             if norm:
                 # normalize before oned2inferno,
                 # so that the ranges are similar within B across S
-                im = utils.basic.normalize(im)
+                im = basic.normalize(im)
 
             im = im.view(B*S, C, H, W)
             vis = oned2inferno(im, norm=norm)
@@ -588,7 +588,7 @@ class Summ_writer(object):
                     feats = torch.mean(feats, dim=reduce_dim)
                 else: 
                     valids = valids.repeat(1, 1, feats.size()[2], 1, 1, 1)
-                    feats = utils.basic.reduce_masked_mean(feats, valids, dim=reduce_dim)
+                    feats = basic.reduce_masked_mean(feats, valids, dim=reduce_dim)
 
             B, S, C, D, W = list(feats.size())
 
@@ -600,8 +600,8 @@ class Summ_writer(object):
                 return self.summ_oneds(name=name, ims=feats, norm=True, only_return=only_return, frame_ids=frame_ids)
 
             else:
-                __p = lambda x: utils.basic.pack_seqdim(x, B)
-                __u = lambda x: utils.basic.unpack_seqdim(x, B)
+                __p = lambda x: basic.pack_seqdim(x, B)
+                __u = lambda x: basic.unpack_seqdim(x, B)
 
                 feats_  = __p(feats)
                 
@@ -631,7 +631,7 @@ class Summ_writer(object):
                     feat = torch.mean(feat, dim=reduce_axis)
                 else:
                     valid = valid.repeat(1, feat.size()[1], 1, 1, 1)
-                    feat = utils.basic.reduce_masked_mean(feat, valid, dim=reduce_axis)
+                    feat = basic.reduce_masked_mean(feat, valid, dim=reduce_axis)
                     
             B, C, D, W = list(feat.shape)
 

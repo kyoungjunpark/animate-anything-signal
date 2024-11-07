@@ -66,6 +66,7 @@ from scipy.spatial.distance import euclidean
 from models.pipeline_signal_v3_multi_input_compact_coord_multi_r import MaskStableVideoDiffusionPipeline
 from utils.pips.demo import run_model
 from utils.pips.nets.pips import Pips
+from utils.cdfvd import fvd
 
 decord.bridge.set_bridge('torch')
 
@@ -783,6 +784,28 @@ def main(
         batch_size=train_batch_size,
         shuffle=shuffle
     )
+    real_videos = []
+    for step, batch in enumerate(tqdm(train_dataloader)):
+        if step > 1000:
+            break
+        pixel_values = batch['pixel_values']
+        image_path = batch['pixel_values_path']
+        bsz, num_frames = pixel_values.shape[:2]
+        vr = decord.VideoReader(image_path[0])
+        frame_step = 3
+        frame_range = list(range(0, len(vr), frame_step))
+        frames = vr.get_batch(frame_range[0:validation_data.num_frames])
+
+        # frames = frames.cpu().numpy()  # Convert to a NumPy array if it's a tensor
+        real_videos.append(frames)
+        print(frames.size())
+
+
+    evaluator = fvd.cdfvd('videomae', ckpt_path=None, n_fake='full')
+    real_videos = torch.stack(real_videos)
+    print(real_videos.size())
+    evaluator.compute_real_stats(evaluator.load_videos(".pt", data_type="video_torch", video_data=real_videos))
+    # # Shape: (1, T, C, H, W)
 
     # Prepare everything with our `accelerator`.
     unet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
@@ -927,11 +950,7 @@ def main(
                         out_file = f"{output_dir}/samples/"
                         eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, final_encoder, validation_data, out_file, global_step)
                         logger.info(f"Saved a new sample to {out_file}")
-                        fid, fvd, fvd_avg, psnr = eval_fid_fvd(test_dataloader, pipeline, vae_processor, sig1, sig2,
-                                                               sig3, camera_fourier, tx_fourier, img1, final_encoder,
-                                                               validation_data, out_file, global_step)
-
-                        if global_step > 10000:
+                        if global_step > 8000:
                             fid, fvd, fvd_avg, psnr = eval_fid_fvd(test_dataloader, pipeline, vae_processor, sig1, sig2,
                                                                    sig3, camera_fourier, tx_fourier, img1, final_encoder,
                                                                    validation_data, out_file, global_step)
@@ -1290,10 +1309,14 @@ def eval_optical_flow(real_videos, fake_videos):
     total_distance1 = []
     with torch.no_grad():
         for video_idx in range(real_videos.size(0)):
-            real_video = real_videos[video_idx:video_idx]
-            fake_video = fake_videos[video_idx:video_idx]
+            real_video = real_videos[video_idx].unsqueeze(0)
+            fake_video = fake_videos[video_idx].unsqueeze(0)
 
             # print(trajs_e.size())  # torch.Size([1, 8, 256, 2])
+            num_frames = 8
+            real_video = real_video[:, ::3, :, :, :][:, :num_frames, :, :, :]  # Shape: [1, 8, 3, 360, 640]
+            fake_video = fake_video[:, ::3, :, :, :][:, :num_frames, :, :, :]  # Shape: [1, 8, 3, 360, 640]
+
             trajs_real = run_model(model, real_video, N, None, None) # torch.Size([1, 8, 3, 360, 640])
             trajs_fake = run_model(model, fake_video, N, None, None)
 
@@ -1303,6 +1326,10 @@ def eval_optical_flow(real_videos, fake_videos):
 
                 slice_real = slice_real.cpu().numpy()
                 slice_fake = slice_fake.cpu().numpy()
+                # indices = np.linspace(0, len(slice_real) - 1, num_frames, dtype=int)
+
+                # slice_real = [slice_real[i] for i in indices]
+                # slice_fake = [slice_fake[i] for i in indices]
 
                 distance, path = fastdtw(slice_real, slice_fake, dist=euclidean)
                 total_distance1.append(distance)
@@ -1311,7 +1338,7 @@ def eval_optical_flow(real_videos, fake_videos):
                 # total_distance2.append(distance2)
 
     # fid_results = np.sum(fid_avg) / len(fid_avg)
-    wandb.log({"optical flow": np.mean(total_distance1) / N})
+    wandb.log({"optical flow": np.mean(total_distance1)})
 
     return np.mean(total_distance1) / N
 
