@@ -71,8 +71,7 @@ def load_videomae_model(device, ckpt_path=None):
         tubelet_size=2,
         drop_path_rate=0.3,
         use_mean_pooling=True)
-
-    ckpt = torch.load(ckpt_path, map_location='cpu')
+    ckpt = torch.load('vit_g_hybrid_pt_1200e_ssv2_ft.pth', map_location='cpu')
     for model_key in ['model', 'module']:
         if model_key in ckpt:
             ckpt = ckpt[model_key]

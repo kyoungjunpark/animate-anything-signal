@@ -529,6 +529,7 @@ class VideoBLIPDataset_V2(Dataset):
 
         example = {
             "pixel_values": normalize_input(video),
+            "pixel_values_real": video,
             "signal_values": signal,
             "camera_pose": camera_pose,
             "tx_pos": tx_pos,
@@ -560,11 +561,6 @@ class VideoBLIPDataset_V2(Dataset):
     def __getitem__(self, index):
         example = self.train_data_sig_agg_batch(index)
         return example
-
-    def remove(self, index):
-        self.train_data.remove(index)
-        return self.train_data
-
 
 class SingleVideoDataset(Dataset):
     def __init__(

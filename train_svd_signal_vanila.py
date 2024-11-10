@@ -58,7 +58,10 @@ from einops import rearrange, repeat
 import imageio
 import wandb
 # from models.unet_3d_condition import UNet3DConditionModel
-
+from fastdtw import fastdtw
+from scipy.spatial.distance import euclidean
+from utils.pips.demo import run_model
+from utils.pips.nets.pips import Pips
 from models.pipeline_signal_vanila import MaskStableVideoDiffusionPipeline
 
 decord.bridge.set_bridge('torch')
@@ -737,6 +740,46 @@ def main(
         batch_size=train_batch_size,
         shuffle=shuffle
     )
+    evaluator = None
+    if accelerator.is_main_process:
+        from utils.cdfvd import fvd
+        evaluator = fvd.cdfvd('videomae', ckpt_path='vit_g_hybrid_pt_1200e_ssv2_ft', n_fake='full')
+        if not os.path.exists("fvd_real.stat"):
+            real_videos = []
+            for step, batch in enumerate(tqdm(train_dataloader)):
+                if step >= 500:
+                    break
+                pixel_values_real = batch['pixel_values_real']
+                """
+                pixel_values = batch['pixel_values']
+                image_path = batch['pixel_values_path']
+                bsz, num_frames = pixel_values.shape[:2]
+                vr = decord.VideoReader(image_path[0])
+                frame_step = 3
+                frame_range = list(range(0, len(vr), frame_step))
+                frames = vr.get_batch(frame_range[0:validation_data.num_frames])
+                frames = rearrange(frames, "f h w c -> f c h w")
+                # frames = frames.cpu().numpy()  # Convert to a NumPy array if it's a tensor
+                real_videos.append(frames)
+                transform = T.Compose([
+                    # T.RandomResizedCrop(size=(height, width), scale=(0.8, 1.0), ratio=(width/height, width/height), antialias=False)
+                    T.Resize(min(448, 448), antialias=False),
+                    T.CenterCrop([448, 448])
+                ])
+                frames = transform(frames)
+                print(pixel_values_real.size(), frames.size())
+                assert torch.equal(pixel_values_real[0], frames), (pixel_values_real[0], frames)
+                print("good")
+                """
+                real_videos.append(pixel_values_real)
+            real_videos = torch.stack(real_videos)
+            real_videos = rearrange(real_videos, "b1 b2 f c h w -> (b1 b2) f c h w")
+            evaluator.compute_real_stats(evaluator.load_videos(".pt", data_type="video_torch", video_data=real_videos))
+            evaluator.save_real_stats("fvd_real.stat")
+            # # Shape: (1, T, C, H, W)
+            del real_videos
+        else:
+            evaluator.load_real_stats("fvd_real.stat")
 
     # Prepare everything with our `accelerator`.
     unet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
@@ -765,7 +808,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("vanila_empty0.2_metrics_strong222")
+        accelerator.init_trackers("vanila_empty0.05_metrics_videomae")
         wandb.login(key="a94ace7392048e560ce6962a468101c6f0158b55")
         wandb.require("core")
 
@@ -876,10 +919,11 @@ def main(
                         out_file = f"{output_dir}/samples/"
                         eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, validation_data, out_file, global_step)
                         logger.info(f"Saved a new sample to {out_file}")
-                        if global_step > 10000:
-                            fid, fvd, fvd_avg, psnr = eval_fid_fvd(test_dataloader, pipeline, vae_processor, sig1, sig2,
-                                                                   sig3, camera_fourier, tx_fourier, img1,
-                                                                   validation_data, out_file, global_step)
+                        if global_step > 8000:
+                            fvd = eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor,
+                                                        sig1, sig2,
+                                                        sig3, camera_fourier, tx_fourier, img1, None,
+                                                        validation_data, out_file, global_step)
 
             logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
             accelerator.log({"training_loss": loss.detach().item()}, step=step)
@@ -1236,6 +1280,189 @@ def eval_fid_fvd(test_dataloader, pipeline, vae_processor, sig1, sig2, sig3, cam
     wandb.log({"psnr": psnr_avg})
 
     return fid_score, fvd_results, fvd_avg, psnr_avg
+
+
+def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, final_encoder, validation_data, out_file, index, forward_t=25, preview=True):
+    vae = pipeline.vae
+    device = vae.device
+    dtype = vae.dtype
+    fid_results = []
+    fvd_results = []
+
+    diffusion_scheduler = pipeline.scheduler
+    diffusion_scheduler.set_timesteps(validation_data.num_inference_steps, device=device)
+    target_file = out_file + "test.mp4"
+    # print(out_file)
+    # print(image_replaced)
+    directory = os.path.dirname(target_file)
+    # Create the directory if it doesn't exist
+    os.makedirs(directory, exist_ok=True)
+    # prompt = validation_data.prompt
+    # scale = math.sqrt(width * height / (validation_data.height * validation_data.width))
+    # block_size = 64
+    # validation_data.height = round(height / scale / block_size) * block_size
+    # validation_data.width = round(width / scale / block_size) * block_size
+
+    # out_mask_path = os.path.splitext(out_file)[0] + "_mask.jpg"
+    # Image.fromarray(np_mask).save(out_mask_path)
+    videos1 = []
+    videos2 = []
+    for step, batch in enumerate(tqdm(test_dataloader)):
+        pixel_values = batch['pixel_values'].to(dtype)
+        image_path = batch['pixel_values_path']
+        bsz, num_frames = pixel_values.shape[:2]
+        vr = decord.VideoReader(image_path[0])
+        frame_step = 3
+        frame_range = list(range(0, len(vr), frame_step))
+        frames = vr.get_batch(frame_range[0:validation_data.num_frames])
+
+        if isinstance(frames, torch.Tensor):
+            frames = frames.cpu().numpy()  # Convert to a NumPy array if it's a tensor
+
+        # Convert each frame to a PIL.Image
+        pil_images = []
+        for i in range(frames.shape[0]):  # Iterate over the batch
+            frame = frames[i]  # Get the i-th frame, shape (height, width, 3)
+            pil_image = Image.fromarray(frame)  # Convert to PIL.Image
+            pil_images.append(pil_image)
+
+        result_signal = torch.real(batch['signal_values']).float().half().squeeze(0)
+        result_signal = result_signal * 1e3
+        if torch.isnan(result_signal).any():
+            print(result_signal)
+            result_signal = torch.nan_to_num(result_signal, nan=0.0)
+
+        # camera_data = np.load(camera_pose)
+        # tx_data = np.loadtxt(tx_loc)
+
+        camera_data = batch['camera_pose'].float().half().to(device).squeeze(0)
+        tx_data = batch['tx_pos'].float().half().to(dtype).to(device).squeeze(0)
+
+        with torch.no_grad():
+            # h, w = validation_data.height // pipeline.vae_scale_factor, validation_data.width // pipeline.vae_scale_factor
+            # initial_latents = torch.randn([1, validation_data.num_frames, 4, h, w], dtype=dtype, device=device)
+            # mask = T.ToTensor()(np_mask).to(dtype).to(device)
+            # mask = T.Resize([h, w], antialias=False)(mask)
+            video_frames = MaskStableVideoDiffusionPipeline.__call__(
+                pipeline,
+                video=pil_images,
+                width=validation_data.width,
+                height=validation_data.height,
+                num_frames=validation_data.num_frames,
+                num_inference_steps=validation_data.num_inference_steps,
+                decode_chunk_size=validation_data.decode_chunk_size,
+                fps=validation_data.fps,
+                motion_bucket_id=validation_data.motion_bucket_id,
+                n_input_frames=validation_data.n_input_frames,
+                signal_latent=None,
+                signal=result_signal,
+                camera_pose=camera_data,
+                tx_pos=tx_data,
+                sig1=sig1,
+                sig2=sig2,
+                sig3=sig3,
+                camera_fourier=camera_fourier,
+                tx_fourier=tx_fourier,
+                img1=img1,
+            ).frames[0]
+
+        transform = transforms.ToTensor()
+
+        # Apply the transformation to each image in the list and collect tensors
+        # tensor_list = [transform(img) for img in pil_images]
+        # print("0", video_frames)
+
+        # Stack the tensors into a single tensor (batch of images)
+        transform = transforms.ToTensor()
+        # Convert each image in the list to a tensor
+        video_frames = [transform(image) for image in video_frames]
+        # Stack the list of tensors into a single tensor
+        video_frames = torch.stack(video_frames)
+
+        vae_scale_factor = 2 ** (len(vae.config.block_out_channels) - 1)
+        image_processor = VaeImageProcessor(vae_scale_factor=vae_scale_factor)
+        # print("2", pil_images[0])
+        transform = T.Compose([
+            # T.RandomResizedCrop(size=(height, width), scale=(0.8, 1.0), ratio=(width/height, width/height), antialias=False)
+            T.Resize(min(validation_data.height, validation_data.width), antialias=False),
+            T.CenterCrop([validation_data.height, validation_data.width]),
+            T.ToTensor()
+        ])
+        pil_images = [transform(image) for image in pil_images]
+
+        # Stack the list of tensors into a single tensor
+        pil_images = torch.stack(pil_images)
+
+        pil_images = pil_images.squeeze(1)
+        if pil_images.size(0) < video_frames.size(0):
+            last_element = pil_images[-1].unsqueeze(0)  # Shape [1, 3, 64, 64]
+
+            # Repeat the last element to fill up the desired shape
+            repeated_elements = last_element.repeat(video_frames.size(0)-pil_images.size(0), 1, 1, 1)  # Repeat 3 times
+
+            # Concatenate the original tensor with the repeated elements
+            pil_images = torch.cat((pil_images, repeated_elements), dim=0)  # Shape [25, 3, 64, 64]
+
+        videos1.append(pil_images)
+        videos2.append(video_frames)
+
+    videos1 = torch.stack(videos1)
+    videos2 = torch.stack(videos2)
+
+    evaluator.empty_fake_stats()
+    evaluator.compute_fake_stats(evaluator.load_videos(".pt", data_type="video_torch", video_data=videos2))
+    score_fvd = evaluator.compute_fvd_from_stats()
+
+    optic_flow = eval_optical_flow(videos1, videos2)
+    wandb.log({"fvd": score_fvd})
+    wandb.log({"optical flow": optic_flow})
+
+    return score_fvd
+
+
+def eval_optical_flow(real_videos, fake_videos):
+    # # torch.Size([11, 25, 3, 64, 64]) torch.Size([11, 25, 3, 64, 64])
+    model = Pips(stride=4).cuda()
+    parameters = list(model.parameters())
+    global_step = 0
+    model.eval()
+
+    global_step += 1
+    N = 16 ** 2  # number of points to track
+
+    total_distance1 = []
+    with torch.no_grad():
+        for video_idx in range(real_videos.size(0)):
+            real_video = real_videos[video_idx].unsqueeze(0)
+            fake_video = fake_videos[video_idx].unsqueeze(0)
+
+            # print(trajs_e.size())  # torch.Size([1, 8, 256, 2])
+            num_frames = 8
+            real_video = real_video[:, ::3, :, :, :][:, :num_frames, :, :, :]  # Shape: [1, 8, 3, 360, 640]
+            fake_video = fake_video[:, ::3, :, :, :][:, :num_frames, :, :, :]  # Shape: [1, 8, 3, 360, 640]
+
+            trajs_real = run_model(model, real_video, N, None, None) # torch.Size([1, 8, 3, 360, 640])
+            trajs_fake = run_model(model, fake_video, N, None, None)
+
+            for i in range(trajs_real.size(2)):  # 256 dimension (index 2)
+                slice_real = trajs_real[0, :, i, :]
+                slice_fake = trajs_fake[0, :, i, :]
+
+                slice_real = slice_real.cpu().numpy()
+                slice_fake = slice_fake.cpu().numpy()
+                # indices = np.linspace(0, len(slice_real) - 1, num_frames, dtype=int)
+
+                # slice_real = [slice_real[i] for i in indices]
+                # slice_fake = [slice_fake[i] for i in indices]
+
+                distance, path = fastdtw(slice_real, slice_fake, dist=euclidean)
+                total_distance1.append(distance)
+
+                 #distance2, path = fastdtw(slice_real, slice_fake2, dist=euclidean)
+                # total_distance2.append(distance2)
+
+    # fid_results = np.sum(fid_avg) / len(fid_avg)
+    return np.sum(total_distance1) / N
 
 
 def decode_latents(latents, vae, num_frames, decode_chunk_size=14):
