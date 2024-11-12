@@ -448,11 +448,9 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
 
         self._guidance_scale = guidance_scale
         # signal
-        signal_values = signal.float().half()  # [FPS, 512]
 
         target_fps = 25
 
-        max_frame = signal_values.size(0)
 
         native_fps = 20
         sample_fps = fps + 1
@@ -641,7 +639,7 @@ class LatentToVideoPipeline(TextToVideoSDPipeline):
 
         # 1. Check inputs. Raise error if not correct
         self.check_inputs(
-            prompt, height, width, callback_steps, negative_prompt, signal, None
+            prompt, height, width, callback_steps, negative_prompt, None
         )
 
         batch_size = 1
@@ -653,21 +651,12 @@ class LatentToVideoPipeline(TextToVideoSDPipeline):
         do_classifier_free_guidance = guidance_scale > 1.0
         # 3. Encode input signal
         # signal [FPS, 512]
-        signal_values = signal.float().half()  # [FPS, 512]
-
-        signal_values = torch.nan_to_num(signal_values, nan=0.0)
         target_fps = 25
 
         native_fps = 20
         sample_fps = num_frames
         frame_step = max(1, round(native_fps / sample_fps))
 
-        frame_range = range(0, signal_values.size(0), frame_step)
-        frame_range_indices = list(frame_range)[:target_fps]
-
-        signal_values = signal_values[frame_range_indices, :]
-
-        signal_values = signal_values.unsqueeze(0)
         # print("unsqueeze", signal_values.size())
 
         # signal_encoder = LatentSignalEncoder(input_dim=signal_values.size(-1) * signal_values.size(-2), output_dim=1024).to(device)
@@ -675,31 +664,6 @@ class LatentToVideoPipeline(TextToVideoSDPipeline):
         signal_encoder = sig1.to(latents.device)
         signal_encoder2 = sig2.to(latents.device)
         signal_encoder3 = sig3.to(latents.device)
-
-        bsz = signal_values.size(0)
-        fps = signal_values.size(1)
-
-        # Encode text embeddings
-        # token_ids = batch['prompt_ids']
-        # signal_encoder = LatentSignalEncoder(output_dim=1024).to(latents.device)
-
-        signal_values_resized = rearrange(signal_values, 'b f c-> b (f c)')
-        # print(signal_values.size())
-        signal_embeddings = signal_encoder(signal_values_resized)
-        signal_embeddings = signal_embeddings.reshape(bsz, 1, -1)
-
-        signal_embeddings2 = signal_encoder2(signal_values).half()
-        # print("signal_embeddings2", signal_embeddings2.size())
-
-        signal_embeddings2 = rearrange(signal_embeddings2, 'b f (c h w)-> (b f) c h w', c=1,
-                                       h=100, w=100)  # [B, FPS, 32]
-        # print("after signal_embeddings2", signal_embeddings2.size())
-        # signal_values torch.Size([2, 25, 512])
-        # signal_embeddings2 torch.Size([2, 25, 10000])
-        # after signal_embeddings2 torch.Size([2, 25, 1, 100, 100])
-        signal_embeddings2 = F.interpolate(signal_embeddings2, size=(latents.size(-2), latents.size(-1)),
-                                           mode='bilinear')
-        signal_embeddings2 = rearrange(signal_embeddings2, '(b f) c h w-> b c f h w', b=bsz)  # [B, FPS, 32]
 
         # mask = batch["mask"]
         # mask = mask.div(255).to(dtype)

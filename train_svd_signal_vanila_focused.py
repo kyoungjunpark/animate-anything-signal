@@ -808,7 +808,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("vanila_empty0.05_metrics_videomae")
+        accelerator.init_trackers("vanila_empty0.05_metrics_videomae_focused")
         wandb.login(key="a94ace7392048e560ce6962a468101c6f0158b55")
         wandb.require("core")
 
@@ -919,7 +919,7 @@ def main(
                         out_file = f"{output_dir}/samples/"
                         eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, validation_data, out_file, global_step)
                         logger.info(f"Saved a new sample to {out_file}")
-                        if global_step > 8000:
+                        if global_step > 2000:
                             fvd = eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor,
                                                         sig1, sig2,
                                                         sig3, camera_fourier, tx_fourier, img1, None,
@@ -985,11 +985,8 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
     for image in sorted(validation_data.prompt_image):
         # print(out_file)
         # print(image)
-        signal = image.replace(".mp4", ".pt")
-        initial_signal = signal.replace(".pt", "_init.pt")
 
         camera_pose = image.replace(".mp4", ".npy")
-        tx_loc = image.replace(".mp4", ".txt")
 
         image_replaced = image.replace("frame", str(index) + "_frame").replace('.mp4', '.gif')
         target_file = out_file + image_replaced
@@ -1018,19 +1015,6 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
         # video = transform(video)
         # video = normalize_input(video)
 
-        signal = torch.real(torch.load(signal, map_location="cuda:0", weights_only=True)).to(dtype).to(device)
-        initial_signal = torch.real(torch.load(initial_signal, map_location="cuda:0", weights_only=True)).to(dtype).to(device)
-        initial_channels = initial_signal.unsqueeze(0)  # Now shape is (1, 512)
-
-        # result_signal = torch.cat((initial_channels, signal), dim=0)  # Result shape will be (53, 512)
-        result_signal = signal - initial_channels
-
-        # result_signal = result_signal * 1e4
-        # result_signal = log_scale_tensor(torch.abs(result_signal))
-        if torch.isnan(result_signal).any():
-            print(result_signal)
-            result_signal = torch.nan_to_num(result_signal, nan=0.0)
-
         camera_data = np.load(camera_pose)
         tx_data = np.loadtxt(tx_loc)
 
@@ -1055,7 +1039,7 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
                     motion_bucket_id=validation_data.motion_bucket_id,
                     n_input_frames=validation_data.n_input_frames,
                     signal_latent=None,
-                    signal=result_signal,
+                    signal=None,
                     camera_pose=camera_data,
                     tx_pos=tx_data,
                     sig1=sig1,
@@ -1087,199 +1071,6 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
                                           caption=target_file.replace('.gif', '.mp4'), format="mp4")})
 
     return 0
-
-
-def eval_fid_fvd(test_dataloader, pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, validation_data, out_file, index, forward_t=25, preview=True):
-    vae = pipeline.vae
-    device = vae.device
-    dtype = vae.dtype
-    fid_results = []
-    fvd_results = []
-
-    diffusion_scheduler = pipeline.scheduler
-    diffusion_scheduler.set_timesteps(validation_data.num_inference_steps, device=device)
-    target_file = out_file + "test.mp4"
-    # print(out_file)
-    # print(image_replaced)
-    directory = os.path.dirname(target_file)
-    # Create the directory if it doesn't exist
-    os.makedirs(directory, exist_ok=True)
-    # prompt = validation_data.prompt
-    # scale = math.sqrt(width * height / (validation_data.height * validation_data.width))
-    # block_size = 64
-    # validation_data.height = round(height / scale / block_size) * block_size
-    # validation_data.width = round(width / scale / block_size) * block_size
-
-    # out_mask_path = os.path.splitext(out_file)[0] + "_mask.jpg"
-    # Image.fromarray(np_mask).save(out_mask_path)
-    videos1 = []
-    videos2 = []
-    for step, batch in enumerate(tqdm(test_dataloader)):
-        pixel_values = batch['pixel_values'].to(dtype)
-        image_path = batch['pixel_values_path']
-        bsz, num_frames = pixel_values.shape[:2]
-        vr = decord.VideoReader(image_path[0])
-        frame_step = 3
-        frame_range = list(range(0, len(vr), frame_step))
-        frames = vr.get_batch(frame_range[0:validation_data.num_frames])
-
-        if isinstance(frames, torch.Tensor):
-            frames = frames.cpu().numpy()  # Convert to a NumPy array if it's a tensor
-
-        # Convert each frame to a PIL.Image
-        pil_images = []
-        for i in range(frames.shape[0]):  # Iterate over the batch
-            frame = frames[i]  # Get the i-th frame, shape (height, width, 3)
-            pil_image = Image.fromarray(frame)  # Convert to PIL.Image
-            pil_images.append(pil_image)
-
-        result_signal = torch.real(batch['signal_values']).float().half().squeeze(0)
-        result_signal = result_signal * 1e3
-        if torch.isnan(result_signal).any():
-            print(result_signal)
-            result_signal = torch.nan_to_num(result_signal, nan=0.0)
-
-        # camera_data = np.load(camera_pose)
-        # tx_data = np.loadtxt(tx_loc)
-
-        camera_data = batch['camera_pose'].float().half().to(device).squeeze(0)
-        tx_data = batch['tx_pos'].float().half().to(dtype).to(device).squeeze(0)
-
-        with torch.no_grad():
-            # h, w = validation_data.height // pipeline.vae_scale_factor, validation_data.width // pipeline.vae_scale_factor
-            # initial_latents = torch.randn([1, validation_data.num_frames, 4, h, w], dtype=dtype, device=device)
-            # mask = T.ToTensor()(np_mask).to(dtype).to(device)
-            # mask = T.Resize([h, w], antialias=False)(mask)
-            video_frames = MaskStableVideoDiffusionPipeline.__call__(
-                pipeline,
-                video=pil_images,
-                width=validation_data.width,
-                height=validation_data.height,
-                num_frames=validation_data.num_frames,
-                num_inference_steps=validation_data.num_inference_steps,
-                decode_chunk_size=validation_data.decode_chunk_size,
-                fps=validation_data.fps,
-                motion_bucket_id=validation_data.motion_bucket_id,
-                n_input_frames=validation_data.n_input_frames,
-                signal_latent=None,
-                signal=result_signal,
-                camera_pose=camera_data,
-                tx_pos=tx_data,
-                sig1=sig1,
-                sig2=sig2,
-                sig3=sig3,
-                camera_fourier=camera_fourier,
-                tx_fourier=tx_fourier,
-                img1=img1,
-            ).frames[0]
-
-        transform = transforms.ToTensor()
-
-        # Apply the transformation to each image in the list and collect tensors
-        # tensor_list = [transform(img) for img in pil_images]
-        # print("0", video_frames)
-
-        # Stack the tensors into a single tensor (batch of images)
-        transform = transforms.ToTensor()
-        # Convert each image in the list to a tensor
-        video_frames = [transform(image) for image in video_frames]
-        # Stack the list of tensors into a single tensor
-        video_frames = torch.stack(video_frames)
-
-        vae_scale_factor = 2 ** (len(vae.config.block_out_channels) - 1)
-        image_processor = VaeImageProcessor(vae_scale_factor=vae_scale_factor)
-        # print("2", pil_images[0])
-        transform = T.Compose([
-            # T.RandomResizedCrop(size=(height, width), scale=(0.8, 1.0), ratio=(width/height, width/height), antialias=False)
-            T.Resize(min(validation_data.height, validation_data.width), antialias=False),
-            T.CenterCrop([validation_data.height, validation_data.width]),
-            T.ToTensor()
-        ])
-        pil_images = [transform(image) for image in pil_images]
-
-        # Stack the list of tensors into a single tensor
-        pil_images = torch.stack(pil_images)
-
-        pil_images = pil_images.squeeze(1)
-        if pil_images.size(0) < video_frames.size(0):
-            last_element = pil_images[-1].unsqueeze(0)  # Shape [1, 3, 64, 64]
-
-            # Repeat the last element to fill up the desired shape
-            repeated_elements = last_element.repeat(video_frames.size(0)-pil_images.size(0), 1, 1, 1)  # Repeat 3 times
-
-            # Concatenate the original tensor with the repeated elements
-            pil_images = torch.cat((pil_images, repeated_elements), dim=0)  # Shape [25, 3, 64, 64]
-
-        # fvd_result = calculate_fvd(pil_images.unsqueeze(0), video_frames.unsqueeze(0), device, method='styleganv')
-        # fvd_result = calculate_fvd(videos1, videos2, device, method='styleganv')
-        # fvd_result2 = calculate_fvd(pil_images, video_frames, device, method='styleganv')
-        videos1.append(pil_images)
-        videos2.append(video_frames)
-        # print(pil_images)
-        # print(video_frames)
-        # print(fvd_result, fvd_result2)
-        # fvd_results.append(fvd_result)
-        # video_tensor = pil_images.squeeze(0)
-
-        # Convert to NumPy array and change the order of dimensions [frames, channels, height, width] -> [frames, height, width, channels]
-        # video_numpy = video_tensor.permute(0, 2, 3, 1).numpy()
-
-        # Normalize pixel values to the range [0, 255]
-        # video_numpy = (255 * (video_numpy - video_numpy.min()) / (video_numpy.max() - video_numpy.min())).astype(np.uint8)
-
-        # imageio.mimwrite(target_file, video_numpy, fps=fps)
-
-    # NUMBER_OF_VIDEOS = 8
-    # VIDEO_LENGTH = 30
-    # CHANNEL = 3
-    # SIZE = 64
-    # tmp_1 = torch.zeros(NUMBER_OF_VIDEOS, VIDEO_LENGTH, CHANNEL, SIZE, SIZE, requires_grad=False)
-    # tmp_2 = torch.ones(NUMBER_OF_VIDEOS, VIDEO_LENGTH, CHANNEL, SIZE, SIZE, requires_grad=False)
-    videos1 = torch.stack(videos1)  # torch.Size([11, 25, 3, 64, 64]) torch.Size([11, 25, 3, 64, 64])
-    videos2 = torch.stack(videos2)
-    # print(videos1.min(), videos2.min(), videos1.max(), videos2.max())
-    # print(videos1.size(), videos2.size())
-    # fvd_result = calculate_fvd(videos1, videos2, device, method='videogpt')
-    fvd_result = calculate_fvd(videos1, videos2, device, method='styleganv')
-
-    psnr_result = calculate_psnr(videos1, videos2)
-
-    # print(fvd_result)
-    # print(fvd_result2)
-    # print(fvd_result)
-    fvd_avg = []
-    for val_key in fvd_result['value'].keys():
-        fvd_avg.append(fvd_result['value'][val_key])
-    fvd_results = fvd_result['value'][25]
-    fvd_avg = np.sum(fvd_avg) / len(fvd_avg)
-
-    psnr_avg = []
-    for val_key in psnr_result['value'].keys():
-        psnr_avg.append(psnr_result['value'][val_key])
-    psnr_avg = np.sum(psnr_avg) / len(psnr_avg)
-
-    fid = FrechetInceptionDistance(device='cuda')
-
-    # Simulate loading batches of real and generated images
-    for video_idx in range(len(videos1)):
-        # Generate dummy data for demonstration (replace these with your real data loading)
-        real_images = videos1[video_idx].to('cuda')  # Replace with your real images
-        generated_images = videos2[video_idx].to('cuda')  # Replace with your generated images
-
-        # Update the FID metric with real and generated images
-        fid.update(real_images, is_real=True)
-        fid.update(generated_images, is_real=False)
-
-    # Compute the FID score after processing all batches
-    fid_score = fid.compute()
-
-    # fid_results = np.sum(fid_avg) / len(fid_avg)
-    wandb.log({"fid": fid_score})
-    wandb.log({"fvd": fvd_results})
-    wandb.log({"fvd (avg)": fvd_avg})
-    wandb.log({"psnr": psnr_avg})
-
-    return fid_score, fvd_results, fvd_avg, psnr_avg
 
 
 def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, final_encoder, validation_data, out_file, index, forward_t=25, preview=True):
@@ -1326,17 +1117,10 @@ def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, s
             pil_image = Image.fromarray(frame)  # Convert to PIL.Image
             pil_images.append(pil_image)
 
-        result_signal = torch.real(batch['signal_values']).float().half().squeeze(0)
-        result_signal = result_signal * 1e3
-        if torch.isnan(result_signal).any():
-            print(result_signal)
-            result_signal = torch.nan_to_num(result_signal, nan=0.0)
-
         # camera_data = np.load(camera_pose)
         # tx_data = np.loadtxt(tx_loc)
 
         camera_data = batch['camera_pose'].float().half().to(device).squeeze(0)
-        tx_data = batch['tx_pos'].float().half().to(dtype).to(device).squeeze(0)
 
         with torch.no_grad():
             # h, w = validation_data.height // pipeline.vae_scale_factor, validation_data.width // pipeline.vae_scale_factor
@@ -1355,9 +1139,9 @@ def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, s
                 motion_bucket_id=validation_data.motion_bucket_id,
                 n_input_frames=validation_data.n_input_frames,
                 signal_latent=None,
-                signal=result_signal,
+                signal=None,
                 camera_pose=camera_data,
-                tx_pos=tx_data,
+                tx_pos=None,
                 sig1=sig1,
                 sig2=sig2,
                 sig3=sig3,
@@ -1441,8 +1225,24 @@ def eval_optical_flow(real_videos, fake_videos):
             real_video = real_video[:, ::3, :, :, :][:, :num_frames, :, :, :]  # Shape: [1, 8, 3, 360, 640]
             fake_video = fake_video[:, ::3, :, :, :][:, :num_frames, :, :, :]  # Shape: [1, 8, 3, 360, 640]
 
-            trajs_real = run_model(model, real_video, N, None, None)  # torch.Size([1, 8, 3, 360, 640])
-            trajs_fake = run_model(model, fake_video, N, None, None)
+            _, real_mask = process_video_tensor(real_video, block_size=int(real_video.size(3) / 30))
+            _, fake_mask = process_video_tensor(fake_video, block_size=int(real_video.size(3) / 30))
+            # print("block size: ", int(real_video.size(3) / 40))
+            # print(real_video.size())
+            # print(real_video_filtered.size())
+            # print(len(real_mask))
+            mask_final = real_mask | fake_mask
+            # print(int(real_video.size(3) / 30), len(real_mask), len(fake_mask), len(mask_final))
+            # 17 48 48 69
+            trajs_real = run_model(model, real_video, N, None, None, mask_final)  # torch.Size([1, 8, 3, 360, 640])
+            trajs_fake = run_model(model, fake_video, N, None, None, mask_final)
+
+            # mask_final = mask_real | mask_fake
+            # trajs_real = real_video * mask_final
+            # trajs_fake = fake_video * mask_final
+
+            # trajs_real = trajs_real * mask_final
+            # trajs_fake = trajs_fake * mask_final
 
             for i in range(trajs_real.size(2)):  # 256 dimension (index 2)
                 slice_real = trajs_real[0, :, i, :]
@@ -1462,7 +1262,106 @@ def eval_optical_flow(real_videos, fake_videos):
                 # total_distance2.append(distance2)
 
     # fid_results = np.sum(fid_avg) / len(fid_avg)
-    return np.sum(total_distance1) / N
+    # print("score: ", np.sum(total_distance1) / N)
+    return np.mean(total_distance1)
+
+
+def process_video_tensor(input_tensor, num_frames=8, similarity_threshold=0.99, block_size=16):
+    """
+    Process the input tensor of shape (1, 8, 3, 360, 640), where:
+    - 1: batch size (can be adjusted)
+    - 8: number of frames (time steps)
+    - 3: color channels (RGB)
+    - 360: height of each frame
+    - 640: width of each frame
+
+    input_tensor: torch.Tensor
+        The input tensor of shape (1, 8, 3, 360, 640)
+
+    Returns:
+        video_tensor: torch.Tensor
+            The processed video tensor with shape (1, F, C, H, W)
+        top_blocks: list
+            List of the most dynamic blocks in the video
+    """
+
+    # Squeeze the batch dimension for easier processing (shape: 8, 3, 360, 640)
+    tensor_input = input_tensor.squeeze(0)
+
+    frames = []
+    motion_scores = []
+    prev_frame = tensor_input[0].cpu().numpy()  # First frame (RGB)
+    prev_frame_gray = np.mean(prev_frame, axis=0)  # Convert to grayscale for motion analysis
+
+    frames.append(prev_frame)
+
+    # Loop over the frames (skip the first one already added)
+    for i in range(1, tensor_input.size(0)):
+        frame = tensor_input[i].cpu().numpy()
+        frame_rgb = frame  # Already RGB
+        gray_frame = np.mean(frame, axis=0)  # Convert to grayscale for motion analysis
+
+        # Compute the optical flow-like difference between frames (motion score)
+        flow = np.abs(prev_frame_gray - gray_frame)
+
+        frames.append(frame_rgb)
+        motion_scores.append(flow)
+
+        # Update previous frame
+        prev_frame_gray = gray_frame
+
+    # Stack motion scores to compute the top 5% threshold
+    motion_scores = np.stack(motion_scores, axis=0)
+    motion_magnitude = np.mean(motion_scores, axis=0)
+
+    # Compute the motion magnitude for each block
+    height, width = motion_magnitude.shape
+    motion_block_scores = []
+
+    # Process the image in blocks (using sliding window approach)
+    for y in range(0, height, block_size):
+        for x in range(0, width, block_size):
+            # Get the block from the motion magnitude
+            block = motion_magnitude[y:y + block_size, x:x + block_size]
+
+            # Compute the sum (or average) motion score for the block
+            block_score = np.sum(block)
+
+            # Store block position and score
+            motion_block_scores.append(((x, y), block_score))
+
+    # Sort blocks by score (highest motion score first)
+    motion_block_scores.sort(key=lambda x: x[1], reverse=True)
+    # Select the top 10% most dynamic blocks
+    num_top_blocks = int(len(motion_block_scores) * 0.05)
+    top_blocks = set([motion_block_scores[i][0] for i in range(num_top_blocks)])
+    # Create the mask to black out dynamic parts in each frame (based on blocks)
+    masked_frames = []
+    for frame in frames:
+        # Create a copy of the frame to apply the mask
+        masked_frame = np.zeros_like(frame)  # Start with a black frame
+        # Iterate over the blocks and set dynamic ones to black
+        for (x, y) in top_blocks:
+            # Set the pixels within the block to black
+            masked_frame[y:y + block_size, x:x + block_size] = frame[y:y + block_size, x:x + block_size]
+
+        masked_frames.append(masked_frame)
+
+    # Now that we have all unique frames, we can select the 8 frames
+    total_frames = len(masked_frames)
+
+    assert total_frames == 8
+    # Convert selected frames to a tensor (F, C, H, W)
+    # frames_tensor = [torch.tensor(frame).permute(2, 0, 1) for frame in masked_frames]  # Convert (H, W, C) to (C, H, W)
+    frames_tensor = [torch.tensor(frame) for frame in masked_frames]  # Convert (H, W, C) to (C, H, W)
+
+    # Stack selected frames into a tensor (F, C, H, W)
+    video_tensor = torch.stack(frames_tensor)
+
+    # Add a batch dimension to make the shape (1, F, C, H, W)
+    video_tensor = video_tensor.unsqueeze(0)
+
+    return video_tensor, top_blocks
 
 
 def decode_latents(latents, vae, num_frames, decode_chunk_size=14):
@@ -1514,7 +1413,7 @@ def main_eval(
     else:
         eval_list = [[validation_data.prompt_image, validation_data.prompt]]
 
-    output_dir = "output/svd_signal_v3_compact"
+    output_dir = "output/svd_vanila_v3_compact"
     iters = 5
     for example in eval_list:
         for t in range(iters):

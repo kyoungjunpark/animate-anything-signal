@@ -201,6 +201,41 @@ def get_frame_agg_signal_batch(signal_path, initial_signal_path, tx_path, camera
     return video, result_channels, camera_pose, tx_pos, frame_step, human_coords
 
 
+def get_frame_agg_infrared_batch(vr_infrared, camera_pose_path, max_frames, sample_fps, vr, transform, empty_room_ratio):
+    native_fps = vr.get_avg_fps()
+    max_range = len(vr)
+    frame_step = max(1, round(native_fps / sample_fps))
+    frame_range = range(0, max_range, frame_step)
+    if len(frame_range) < max_frames:
+        frame_range = np.linspace(0, max_range - 1, max_frames).astype(int)
+    start = random.randint(0, len(frame_range) - max_frames)
+    # start = 0
+    # start = len(frame_range) - max_frames
+    frame_range_indices = list(frame_range)[start:start + max_frames]
+    frames = vr.get_batch(frame_range_indices)
+    video = rearrange(frames, "f h w c -> f c h w")
+    video = transform(video)
+    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    native_fps = vr_infrared.get_avg_fps()
+    max_range = len(vr_infrared)
+    frame_step = max(1, round(native_fps / sample_fps))
+    frame_range = range(0, max_range, frame_step)
+    if len(frame_range) < max_frames:
+        frame_range = np.linspace(0, max_range - 1, max_frames).astype(int)
+    start = random.randint(0, len(frame_range) - max_frames)
+    # start = 0
+    # start = len(frame_range) - max_frames
+    frame_range_indices = list(frame_range)[start:start + max_frames]
+    frames = vr.get_batch(frame_range_indices)
+    video_infrared = rearrange(frames, "f h w c -> f c h w")
+    video_infrared = transform(video)
+
+    camera_pose = np.load(camera_pose_path)
+
+    return video, video_infrared, camera_pose, frame_step
+
+
 def process_video(vid_path, use_bucketing, w, h, get_frame_buckets, get_frame_batch):
     if use_bucketing:
         vr = decord.VideoReader(vid_path)
@@ -411,6 +446,7 @@ class VideoBLIPDataset_V2(Dataset):
             json_data=None,
             vid_data_key: str = "video_path",
             sig_data_key: str = "signal_path",
+            infrared_data_key: str = "infrared_path",
             tx_pos_key: str = "tx_path",
             camera_pose_key: str = "camera_pose_path",
             initial_sig_data_key: str = "initial_signal_path",
@@ -426,6 +462,7 @@ class VideoBLIPDataset_V2(Dataset):
 
         self.vid_data_key = vid_data_key
         self.sig_data_key = sig_data_key
+        self.infrared_data_key = infrared_data_key
         self.tx_pos_key = tx_pos_key
         self.camera_pose_key = camera_pose_key
         self.initial_sig_data_key = initial_sig_data_key
@@ -464,11 +501,12 @@ class VideoBLIPDataset_V2(Dataset):
         clip_path = nested_data['clip_path'] if 'clip_path' in nested_data else None
 
         extended_data.append({
-            self.vid_data_key: data[self.vid_data_key],
-            self.sig_data_key: data[self.sig_data_key],
-            self.initial_sig_data_key: data[self.initial_sig_data_key],
-            self.tx_pos_key: data[self.tx_pos_key],
-            self.camera_pose_key: data[self.camera_pose_key],
+            self.vid_data_key: data[self.vid_data_key] if self.vid_data_key in data.keys() else None,
+            self.sig_data_key: data[self.sig_data_key] if self.sig_data_key in data.keys() else None,
+            self.initial_sig_data_key: data[self.initial_sig_data_key] if self.initial_sig_data_key in data.keys() else None,
+            self.tx_pos_key: data[self.tx_pos_key] if self.tx_pos_key in data.keys() else None,
+            self.infrared_data_key: data[self.infrared_data_key] if self.infrared_data_key in data.keys() else None,
+            self.camera_pose_key: data[self.camera_pose_key] if self.camera_pose_key in data.keys() else None,
             'frame_index': nested_data['frame_index'],
             'prompt': nested_data['prompt'],
             'clip_path': clip_path
@@ -513,33 +551,57 @@ class VideoBLIPDataset_V2(Dataset):
             self.sample_start_idx = vid_data['frame_index']
 
         vr = decord.VideoReader(clip_path)
-        video, signal, camera_pose, tx_pos, frame_step, human_coords = get_frame_agg_signal_batch(vid_data[self.sig_data_key], vid_data[self.initial_sig_data_key], vid_data[self.tx_pos_key],
-                                                               vid_data[self.camera_pose_key], self.n_sample_frames,
-                                                               self.fps, vr, self.transform, self.empty_room_ratio)
-        # video = get_frame_batch(self.n_sample_frames, self.fps, vr, self.transform)
+        # Wifi
+        if self.sig_data_key in vid_data.keys():
+            video, signal, camera_pose, tx_pos, frame_step, infrared, human_coords = get_frame_agg_signal_batch(vid_data[self.sig_data_key], vid_data[self.initial_sig_data_key], vid_data[self.tx_pos_key],
+                                                                   vid_data[self.camera_pose_key], vid_data[self.camera_pose_key], self.n_sample_frames,
+                                                                   self.fps, vr, self.transform, self.empty_room_ratio)
+            # video = get_frame_batch(self.n_sample_frames, self.fps, vr, self.transform)
 
-        # prompt_ids = np.array(0)
-        # prompt = np.array(0)
-        prompt_ids = get_prompt_ids(prompt, self.tokenizer)
-        if human_coords:
-            prompt = "empty"
+            # prompt_ids = np.array(0)
+            # prompt = np.array(0)
+            prompt_ids = get_prompt_ids(prompt, self.tokenizer)
+            if human_coords:
+                prompt = "empty"
 
+            else:
+                prompt = "not"
+
+            example = {
+                "pixel_values": normalize_input(video),
+                "pixel_values_real": video,
+                "signal_values": signal,
+                "camera_pose": camera_pose,
+                "tx_pos": tx_pos,
+                "human_pos": human_coords,
+                "prompt_ids": prompt_ids,
+                "text_prompt": prompt,
+                "frame_step": frame_step,
+                "pixel_values_path": clip_path,
+                'dataset': self.__getname__(),
+            }
+        elif self.infrared_data_key in vid_data.keys():
+            vr_infrared = decord.VideoReader(vid_data[self.infrared_data_key])
+            video, video_infrared, camera_pose, frame_step = get_frame_agg_infrared_batch(vr_infrared, vid_data[self.camera_pose_key], self.n_sample_frames,
+                self.fps, vr, self.transform, self.empty_room_ratio)
+            # video = get_frame_batch(self.n_sample_frames, self.fps, vr, self.transform)
+
+            rompt_ids = np.array(0)
+            prompt = np.array(0)
+
+            example = {
+                "pixel_values": normalize_input(video),
+                "pixel_values_real": video,
+                "infrared_pixel_values": normalize_input(video_infrared),
+                "camera_pose": camera_pose,
+                "prompt_ids": prompt_ids,
+                "text_prompt": prompt,
+                "frame_step": frame_step,
+                "pixel_values_path": clip_path,
+                'dataset': self.__getname__(),
+            }
         else:
-            prompt = "not"
-
-        example = {
-            "pixel_values": normalize_input(video),
-            "pixel_values_real": video,
-            "signal_values": signal,
-            "camera_pose": camera_pose,
-            "tx_pos": tx_pos,
-            "human_pos": human_coords,
-            "prompt_ids": prompt_ids,
-            "text_prompt": prompt,
-            "frame_step": frame_step,
-            "pixel_values_path": clip_path,
-            'dataset': self.__getname__(),
-        }
+            raise Exception
         # mask = np.array(0)
         mask = get_moved_area_mask(video.permute([0, 2, 3, 1]).numpy())
         example['mask'] = mask
