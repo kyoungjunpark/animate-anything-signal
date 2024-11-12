@@ -384,7 +384,7 @@ def enforce_zero_terminal_snr(betas):
 
 
 def should_sample(global_step, validation_steps, validation_data):
-    return (global_step % validation_steps == 0 or global_step == 5) \
+    return (global_step % validation_steps == 0 or global_step == 1) \
            and validation_data.sample_preview
 
 
@@ -534,6 +534,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     input_latents = torch.cat([c_in * noisy_latents, condition_latent / vae.config.scaling_factor], dim=2)
 
     assert "frame_step" in batch.keys(), batch.keys()
+
     # infrared
     video_encoder_hidden = video_encoder_hidden.to(latents.device).to(dtype)
     video_encoder = video_encoder.to(latents.device).to(dtype)
@@ -1095,7 +1096,7 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, video_encoder, video_encoder
 
         # infrared
         vr = decord.VideoReader(infrared)
-        frame_step = 3
+        frame_step = validation_data.frame_step
         frame_range = list(range(0, len(vr), frame_step))
         frames = vr.get_batch(frame_range[0:validation_data.num_frames])
 
@@ -1106,13 +1107,17 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, video_encoder, video_encoder
         pil_infrared_images = []
         for i in range(frames.shape[0]):  # Iterate over the batch
             frame = frames[i]  # Get the i-th frame, shape (height, width, 3)
-            pil_image = Image.fromarray(frame)  # Convert to PIL.Image
+            # pil_image = torch.tensor(frame)  # Convert to PIL.Image
+            pil_image = Image.fromarray(frame)
+            # pil_image = rearrange(pil_image, 'h w c-> c h w').to(dtype)
             pil_infrared_images.append(pil_image)
+        # pil_infrared_images = torch.stack(pil_infrared_images)
+        # pil_infrared_images = pil_infrared_images.unsqueeze(0)
 
         signal = torch.real(torch.load(signal, map_location="cuda:0", weights_only=True)).to(dtype).to(device)
         initial_signal = torch.real(torch.load(initial_signal, map_location="cuda:0", weights_only=True)).to(dtype).to(device)
         initial_channels = initial_signal.unsqueeze(0)  # Now shape is (1, 512)
-        initial_channels = initial_channels.repeat(3, 1, 1)
+        initial_channels = initial_channels.repeat(validation_data.frame_step, 1, 1)
         # torch.Size([154, 512, 4]) torch.Size([3, 512, 4])
 
         result_signal = torch.cat((initial_channels, signal), dim=0)  # Result shape will be (53, 512)
@@ -1145,6 +1150,7 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, video_encoder, video_encoder
                     num_inference_steps=validation_data.num_inference_steps,
                     decode_chunk_size=validation_data.decode_chunk_size,
                     fps=validation_data.fps,
+                    frame_step=validation_data.frame_step,
                     motion_bucket_id=validation_data.motion_bucket_id,
                     n_input_frames=validation_data.n_input_frames,
                     signal_latent=None,
@@ -1186,9 +1192,8 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, video_encoder, video_encoder
     return 0
 
 
-
-
-def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, final_encoder, validation_data, out_file, index, forward_t=25, preview=True):
+def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, sig1, sig2, sig3, video_encoder,
+                          video_encoder_hidden, camera_fourier, tx_fourier, img1, final_encoder, validation_data, out_file, index, forward_t=25, preview=True):
     vae = pipeline.vae
     device = vae.device
     dtype = vae.dtype
@@ -1219,7 +1224,7 @@ def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, s
 
         # image
         vr = decord.VideoReader(image_path[0])
-        frame_step = 3
+        frame_step = validation_data.frame_step
         frame_range = list(range(0, len(vr), frame_step))
         frames = vr.get_batch(frame_range[0:validation_data.num_frames])
 
@@ -1241,7 +1246,7 @@ def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, s
 
         # infrared
         vr = decord.VideoReader(infrared_image_path[0])
-        frame_step = 3
+        frame_step = validation_data.frame_step
         frame_range = list(range(0, len(vr), frame_step))
         frames = vr.get_batch(frame_range[0:validation_data.num_frames])
 
@@ -1252,7 +1257,9 @@ def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, s
         pil_infrared_images = []
         for i in range(frames.shape[0]):  # Iterate over the batch
             frame = frames[i]  # Get the i-th frame, shape (height, width, 3)
-            pil_image = Image.fromarray(frame)  # Convert to PIL.Image
+            # pil_image = torch.tensor(frame)  # Convert to PIL.Image
+            pil_image = Image.fromarray(frame)
+            # pil_image = rearrange(pil_image, 'h w c-> c h w').to(dtype)
             pil_infrared_images.append(pil_image)
 
         camera_data = batch['camera_pose'].float().half().to(device).squeeze(0)
@@ -1272,6 +1279,7 @@ def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, s
                 num_inference_steps=validation_data.num_inference_steps,
                 decode_chunk_size=validation_data.decode_chunk_size,
                 fps=validation_data.fps,
+                frame_step=validation_data.frame_step,
                 motion_bucket_id=validation_data.motion_bucket_id,
                 n_input_frames=validation_data.n_input_frames,
                 signal_latent=None,

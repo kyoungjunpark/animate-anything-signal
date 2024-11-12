@@ -701,18 +701,18 @@ class VideoEncoderHidden(nn.Module):
 
         # Encoder using 3D convolutions
         self.encoder = nn.Sequential(
-            nn.Conv3d(n_input_frames, 32, kernel_size=(3, 4, 4), stride=(1, 2, 2), padding=(1, 1, 1)),
+            nn.Conv3d(n_input_frames, 16, kernel_size=(3, 4, 4), stride=(1, 2, 2), padding=(1, 1, 1)),
             # (b, 32, f, h/2, w/2)
             nn.ReLU(),
-            nn.Conv3d(32, 64, kernel_size=(3, 4, 4), stride=(1, 2, 2), padding=(1, 1, 1)),  # (b, 64, f, h/4, w/4)
+            nn.Conv3d(16, 32, kernel_size=(3, 4, 4), stride=(1, 2, 2), padding=(1, 1, 1)),  # (b, 64, f, h/4, w/4)
             nn.ReLU(),
-            nn.Conv3d(64, 128, kernel_size=(3, 4, 4), stride=(2, 2, 2), padding=(1, 1, 1)),  # (b, 128, f/2, h/8, w/8)
+            nn.Conv3d(32, 64, kernel_size=(3, 4, 4), stride=(2, 2, 2), padding=(1, 1, 1)),  # (b, 128, f/2, h/8, w/8)
             nn.ReLU(),
             nn.Flatten()
         )
 
         # Linear layer to produce a latent representation
-        self.fc_latent = nn.Linear(2 * target_h * target_w * 128, latent_dim)
+        self.fc_latent = nn.Linear(2 * target_h * target_w * 64, latent_dim)
 
     def forward(self, x):
         batch_size, frames, channels, width, height = x.shape
@@ -724,52 +724,66 @@ class VideoEncoderHidden(nn.Module):
 
 
 class VideoEncoder(nn.Module):
-    def __init__(self, target_h, target_w, n_input_frames=10, n_inpt_frames=10, output_dim=4):
+    def __init__(self, target_h, target_w, n_inpt_frames=10, output_dim=4):
         super(VideoEncoder, self).__init__()
         self.output_dim = output_dim
-        # Temporal encoding layer
-        self.temporal_conv = nn.Conv3d(
-            in_channels=n_inpt_frames,
+        self.n_inpt_frames = n_inpt_frames
+
+        # Temporal encoding layer - Apply Conv2d across each frame
+        self.temporal_conv = nn.Conv2d(
+            in_channels=3,  # Assuming 3 channels per frame
             out_channels=64,
-            kernel_size=(3, 3, 3),
-            stride=(1, 2, 2),
-            padding=(1, 1, 1)
+            kernel_size=3,
+            stride=2,
+            padding=1
         )
 
-        # Downsampling in spatial dimensions
-        self.downsample1 = nn.Conv3d(
+        # Downsampling layers in spatial dimensions
+        self.downsample1 = nn.Conv2d(
             in_channels=64,
             out_channels=128,
-            kernel_size=(3, 3, 3),
-            stride=(2, 2, 2),
-            padding=(1, 1, 1)
+            kernel_size=3,
+            stride=2,
+            padding=1
         )
-        self.downsample2 = nn.Conv3d(
+        self.downsample2 = nn.Conv2d(
             in_channels=128,
             out_channels=256,
-            kernel_size=(3, 3, 3),
-            stride=(2, 2, 2),
-            padding=(1, 1, 1)
+            kernel_size=3,
+            stride=2,
+            padding=1
         )
 
         # Reduce channels to the desired output shape
-        self.final_conv = nn.Conv3d(
+        self.final_conv = nn.Conv2d(
             in_channels=256,
             out_channels=1,
-            kernel_size=(1, 1, 1),  # Use 1x1x1 instead
-            stride=(1, 1, 1)
+            kernel_size=1  # Use 1x1 to reduce channels
         )
 
         # Output layer reshaping
-        self.pool = nn.AdaptiveAvgPool3d((1, target_h, target_w))
+        self.pool = nn.AdaptiveAvgPool2d((target_h, target_w))
 
     def forward(self, x):
-        # Pass through layers
-        x = self.temporal_conv(x)
-        x = self.downsample1(x)
-        x = self.downsample2(x)
-        x = self.final_conv(x)
+        # Apply temporal convolution to each frame
+        batch_size, num_frames, channels, height, width = x.shape
+        frame_features = []
+
+        for i in range(num_frames):
+            frame = x[:, i]  # Shape: (batch, channels, height, width)
+            frame = self.temporal_conv(frame)  # Apply Conv2d to each frame
+            frame = self.downsample1(frame)
+            frame = self.downsample2(frame)
+            frame_features.append(frame)
+
+        # Stack along the temporal dimension
+        x = torch.stack(frame_features, dim=1)  # Shape: (batch, frames, channels, height, width)
+
+        # Apply final convolution and pooling
+        x = self.final_conv(x.mean(dim=1))  # Mean over frames, then reduce channels
         x = self.pool(x)
+        x = x.unsqueeze(1)
+        # print("xxxxxxxx", x.size())
         return x
 
 

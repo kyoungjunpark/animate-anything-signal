@@ -114,12 +114,15 @@ def load_channel(channels, frame_step, frame_range_indices):
 
 
 def load_channel2(channels, max_frame, frame_step, frame_range_indices):
-    partial_channels = channels[frame_range_indices[0]+3:frame_range_indices[-1] + frame_step + 3, :]
+    # print(frame_range_indices, frame_step, max_frame)
+    # [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120] 5
+    # # 157
+    partial_channels = channels[frame_step+frame_range_indices[0]:frame_step+frame_range_indices[-1] + frame_step, :]
 
     # partial_channels = F.pad(partial_channels, (0, 0, 0, 78 - partial_channels.size(0)))
     partial_channels = partial_channels[:(max_frame+1) * frame_step, :]
 
-    partial_channels = torch.cat((channels[:3,:], partial_channels), dim=0)  # Shape: (78, 512, 4)
+    partial_channels = torch.cat((channels[:frame_step,:], partial_channels), dim=0)  # Shape: (78, 512, 4)
 
     return partial_channels
 
@@ -261,11 +264,17 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
             callback_on_step_end_tensor_inputs: List[str] = ["latents"],
             return_dict: bool = True,
             n_input_frames=5,
+            frame_step=None,
+            signal_latent=None,
             infrared_video=None,
+            signal=None,
             camera_pose=None,
+            tx_pos=None,
             sig1=None,
             sig2=None,
             sig3=None,
+            video_encoder=None,
+            video_encoder_hidden=None,
             camera_fourier=None,
             tx_fourier=None,
             img1=None,
@@ -371,7 +380,6 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         signal_encoder2 = sig2
         signal_encoder3 = sig3
 
-
         # assert batch_size == 1
         device = self._execution_device
         # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
@@ -412,6 +420,18 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         image_latents = image_pool(image_latents) / self.vae_scale_factor
         images_latent = image_latents.repeat(1, num_frames, 1, 1, 1)
         # mask = repeat(mask, '1 h w -> 2 f 1 h w', f=num_frames)
+
+        # infrared
+        # print("infrared_video", infrared_video.size()) # infrared_video torch.Size([1, 25, 3, 768, 768])
+        infrared_images = infrared_video[0:n_input_frames]
+        infrared_images = self.image_processor.preprocess(infrared_images, height=height, width=width).to(dtype)
+        # print("infrared_images", infrared_images.size()) # infrared_images torch.Size([10, 3, 64, 64])
+        infrared_images = infrared_images.unsqueeze(0).to(device)
+
+        infrared_embeddings = video_encoder(infrared_images)
+        infrared_hidden_embeddings = video_encoder_hidden(infrared_images)
+
+        infrared_embeddings = infrared_embeddings.repeat(1, num_frames, 1, 1, 1)  # condition_latent torch.Size([1, 50, 20, 8, 8])
         # 5. Get Added Time IDs
         added_time_ids = self._get_add_time_ids(
             fps,
@@ -458,7 +478,6 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
 
         native_fps = 20
         sample_fps = fps + 1
-        frame_step = max(1, round(native_fps / sample_fps))
         frame_range = range(0, max_frame, frame_step)
 
         start = 0
@@ -489,7 +508,8 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         signal_embeddings2 = signal_encoder2(deducted_signal)
 
         # encoder_hidden_states = torch.cat((image_embeddings, signal_embeddings), dim=2)
-        encoder_hidden_states = signal_embeddings.to(dtype)
+        # encoder_hidden_states = signal_embeddings.to(dtype)
+        encoder_hidden_states = torch.cat((signal_embeddings, infrared_hidden_embeddings), dim=2)
 
         signal_latent = signal_embeddings2.to(dtype)
 
@@ -512,6 +532,8 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         images_latent = torch.cat([images_latent] * 2) if do_classifier_free_guidance else images_latent
 
         camera_latent = torch.cat([camera_latent] * 2) if do_classifier_free_guidance else camera_latent
+        infrared_embeddings = torch.cat([infrared_embeddings] * 2) if do_classifier_free_guidance else infrared_embeddings
+
         tx_latent = torch.cat([tx_latent] * 2) if do_classifier_free_guidance else tx_latent
         camera_latent = camera_latent.repeat(1, num_frames, 1, 1, 1)  # condition_latent torch.Size([1, 50, 20, 8, 8])
         tx_latent = tx_latent.repeat(1, num_frames, 1, 1, 1)  # condition_latent torch.Size([1, 50, 20, 8, 8])
@@ -519,7 +541,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
             [encoder_hidden_states] * 2) if do_classifier_free_guidance else encoder_hidden_states
 
         encoder_hidden_states = encoder_hidden_states.repeat_interleave(repeats=num_frames, dim=0)
-        final_input = final_encoder(torch.cat([camera_latent, tx_latent, signal_initial_latent, signal_latent, images_latent], dim=2))
+        final_input = final_encoder(torch.cat([camera_latent, tx_latent, signal_initial_latent, signal_latent, images_latent, infrared_embeddings], dim=2))
         # 8. Denoising loop
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         self._num_timesteps = len(timesteps)
