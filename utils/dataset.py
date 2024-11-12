@@ -552,7 +552,7 @@ class VideoBLIPDataset_V2(Dataset):
 
         vr = decord.VideoReader(clip_path)
         # Wifi
-        if self.sig_data_key in vid_data.keys():
+        if vid_data[self.sig_data_key] is not None:
             video, signal, camera_pose, tx_pos, frame_step, infrared, human_coords = get_frame_agg_signal_batch(vid_data[self.sig_data_key], vid_data[self.initial_sig_data_key], vid_data[self.tx_pos_key],
                                                                    vid_data[self.camera_pose_key], vid_data[self.camera_pose_key], self.n_sample_frames,
                                                                    self.fps, vr, self.transform, self.empty_room_ratio)
@@ -580,13 +580,13 @@ class VideoBLIPDataset_V2(Dataset):
                 "pixel_values_path": clip_path,
                 'dataset': self.__getname__(),
             }
-        elif self.infrared_data_key in vid_data.keys():
+        elif vid_data[self.infrared_data_key] is not None:
             vr_infrared = decord.VideoReader(vid_data[self.infrared_data_key])
             video, video_infrared, camera_pose, frame_step = get_frame_agg_infrared_batch(vr_infrared, vid_data[self.camera_pose_key], self.n_sample_frames,
                 self.fps, vr, self.transform, self.empty_room_ratio)
             # video = get_frame_batch(self.n_sample_frames, self.fps, vr, self.transform)
 
-            rompt_ids = np.array(0)
+            prompt_ids = np.array(0)
             prompt = np.array(0)
 
             example = {

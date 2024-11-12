@@ -455,7 +455,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         native_fps = 20
         sample_fps = fps + 1
         frame_step = max(1, round(native_fps / sample_fps))
-        frame_range = range(0, max_frame, frame_step)
+        frame_range = range(0, 100, frame_step)
 
         start = 0
         frame_range_indices = list(frame_range)[start:start + num_frames]

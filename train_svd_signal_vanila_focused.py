@@ -808,7 +808,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("vanila_empty0.05_metrics_videomae_focused")
+        accelerator.init_trackers("infrared_vanila_empty0.05_metrics_videomae_focused")
         wandb.login(key="a94ace7392048e560ce6962a468101c6f0158b55")
         wandb.require("core")
 
@@ -1016,10 +1016,8 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
         # video = normalize_input(video)
 
         camera_data = np.load(camera_pose)
-        tx_data = np.loadtxt(tx_loc)
 
         camera_data = torch.from_numpy(camera_data).to(dtype).to(device)
-        tx_data = torch.from_numpy(tx_data).to(dtype).to(device)
 
         with torch.no_grad():
             if motion_mask:
@@ -1041,7 +1039,7 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
                     signal_latent=None,
                     signal=None,
                     camera_pose=camera_data,
-                    tx_pos=tx_data,
+                    tx_pos=None,
                     sig1=sig1,
                     sig2=sig2,
                     sig3=sig3,
