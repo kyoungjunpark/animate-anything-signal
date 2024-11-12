@@ -598,6 +598,7 @@ class VideoBLIPDataset_V2(Dataset):
                 "text_prompt": prompt,
                 "frame_step": frame_step,
                 "pixel_values_path": clip_path,
+                "infrared_pixel_values_path": vid_data[self.infrared_data_key],
                 'dataset': self.__getname__(),
             }
         else:

@@ -395,7 +395,7 @@ def enforce_zero_terminal_snr(betas):
 
 
 def should_sample(global_step, validation_steps, validation_data):
-    return (global_step % validation_steps == 0 or global_step == 5 or global_step == 100) \
+    return (global_step % validation_steps == 0 or global_step == 5) \
            and validation_data.sample_preview
 
 
