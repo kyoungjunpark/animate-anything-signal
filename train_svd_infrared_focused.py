@@ -134,10 +134,10 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
     CHIRP_LEN = 512 * 4  # 512 is channel, 4 is number of receivers
     encoder_hidden_dim = 1024
 
-    image_encoder = CompactImageReduction(input_dim=4, frame_step=frame_step, n_input_frames=n_input_frames, target_h=b, target_w=height // 8)
+    image_encoder = CompactImageReduction(input_dim=4, frame_step=frame_step, n_input_frames=n_input_frames, target_h=width // 8, target_w=height // 8)
 
     fps += 1
-    signal_encoder = CompactSignalTransformer2(input_size=CHIRP_LEN, frame_step=frame_step, n_input_frames=n_input_frames+1, target_h=16, target_w=64/2, output_dim=1)
+    signal_encoder = CompactSignalTransformer2(input_size=CHIRP_LEN, frame_step=frame_step, n_input_frames=n_input_frames+1, target_h=16, target_w=64 // 2, output_dim=1)
 
 
     # Just large dim for later interpolation
@@ -540,10 +540,11 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
 
     infrared_pixel_values = batch['infrared_pixel_values']
     infrared_images = infrared_pixel_values[:, 0:n_input_frames].to(dtype) # b f c h w
-    # infrared_image = rearrange(image, 'b f c h w-> (b f) c h w').to(dtype)
+    # infrared_image = rearrange(image, 'b f c  h w-> (b f) c h w').to(dtype)
 
     infrared_hidden_embeddings = video_encoder_hidden(infrared_images)
     infrared_embeddings = video_encoder(infrared_images)
+    infrared_embeddings = infrared_embeddings.repeat(1, num_frames, 1, 1, 1) # condition_latent torch.Size([1, 50, 20, 8, 8])
 
     # Signal embedding
     assert "frame_step" in batch.keys(), batch.keys()
@@ -571,6 +572,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     # (2,25,3,512*4) - (2,512*4)
     deducted_signal = signal_values_reshaped[:, 1:] - init_signals
     signal_values_reshaped_input = signal_values_reshaped[:, :n_input_frames+1]
+
     signal_embeddings = signal_encoder(signal_values_reshaped_input)
     signal_embeddings = signal_embeddings.reshape(bsz, 1, -1)
 
@@ -1027,9 +1029,166 @@ def main(
     accelerator.end_training()
 
 
-def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, sig1, sig2, sig3, video_encoder,
-                          video_encoder_hidden,camera_fourier, tx_fourier, img1, final_encoder, validation_data,
-                          out_file, index, forward_t=25, preview=True):
+def eval(pipeline, vae_processor, sig1, sig2, sig3, video_encoder, video_encoder_hidden, camera_fourier, tx_fourier, img1, final_encoder, validation_data, out_file, index, forward_t=25, preview=True):
+    vae = pipeline.vae
+    device = vae.device
+    dtype = vae.dtype
+
+    diffusion_scheduler = pipeline.scheduler
+    diffusion_scheduler.set_timesteps(validation_data.num_inference_steps, device=device)
+
+    frame_step = validation_data.frame_step
+
+    # prompt = validation_data.prompt
+    # scale = math.sqrt(width * height / (validation_data.height * validation_data.width))
+    # block_size = 64
+    # validation_data.height = round(height / scale / block_size) * block_size
+    # validation_data.width = round(width / scale / block_size) * block_size
+
+    # out_mask_path = os.path.splitext(out_file)[0] + "_mask.jpg"
+    # Image.fromarray(np_mask).save(out_mask_path)
+    motion_mask = True
+    # prepare inital latents
+    initial_latents = None
+    transform = T.Compose([
+        # T.RandomResizedCrop(size=(height, width), scale=(0.8, 1.0), ratio=(width/height, width/height), antialias=False)
+        T.Resize(min(validation_data.height, validation_data.width), antialias=False),
+        T.CenterCrop([validation_data.height, validation_data.width])
+    ])
+
+    for image in sorted(validation_data.prompt_image):
+        # print(out_file)
+        # print(image)
+        infrared = image.replace(".mp4", "_i.mp4")
+
+        signal = image.replace(".mp4", ".pt")
+        initial_signal = signal.replace(".pt", "_init.pt")
+
+        camera_pose = image.replace(".mp4", ".npy")
+        tx_loc = image.replace(".mp4", ".txt")
+
+        image_replaced = image.replace("frame", str(index) + "_frame").replace('.mp4', '.gif')
+        target_file = out_file + image_replaced
+        # print(out_file)
+        # print(image_replaced)
+        directory = os.path.dirname(target_file)
+        # Create the directory if it doesn't exist
+        os.makedirs(directory, exist_ok=True)
+
+        # pimg = Image.open(image)
+        vr = decord.VideoReader(image)
+        frame_range = list(range(0, len(vr), frame_step))
+        frames = vr.get_batch(frame_range[0:validation_data.num_frames])
+
+        if isinstance(frames, torch.Tensor):
+            frames = frames.cpu().numpy()  # Convert to a NumPy array if it's a tensor
+
+        # Convert each frame to a PIL.Image
+        pil_images = []
+        for i in range(frames.shape[0]):  # Iterate over the batch
+            frame = frames[i]  # Get the i-th frame, shape (height, width, 3)
+            pil_image = Image.fromarray(frame)  # Convert to PIL.Image
+            pil_images.append(pil_image)
+        # video = rearrange(frames, "f h w c -> f c h w")
+        # video = transform(video)
+        # video = normalize_input(video)
+
+        # infrared
+        vr = decord.VideoReader(infrared)
+        frame_step = 3
+        frame_range = list(range(0, len(vr), frame_step))
+        frames = vr.get_batch(frame_range[0:validation_data.num_frames])
+
+        if isinstance(frames, torch.Tensor):
+            frames = frames.cpu().numpy()  # Convert to a NumPy array if it's a tensor
+
+        # Convert each frame to a PIL.Image
+        pil_infrared_images = []
+        for i in range(frames.shape[0]):  # Iterate over the batch
+            frame = frames[i]  # Get the i-th frame, shape (height, width, 3)
+            pil_image = Image.fromarray(frame)  # Convert to PIL.Image
+            pil_infrared_images.append(pil_image)
+
+        signal = torch.real(torch.load(signal, map_location="cuda:0", weights_only=True)).to(dtype).to(device)
+        initial_signal = torch.real(torch.load(initial_signal, map_location="cuda:0", weights_only=True)).to(dtype).to(device)
+        initial_channels = initial_signal.unsqueeze(0)  # Now shape is (1, 512)
+        initial_channels = initial_channels.repeat(3, 1, 1)
+        # torch.Size([154, 512, 4]) torch.Size([3, 512, 4])
+
+        result_signal = torch.cat((initial_channels, signal), dim=0)  # Result shape will be (53, 512)
+        # result_signal = signal - initial_channels
+        # result_signal = result_signal * 1e4
+        # result_signal = log_scale_tensor(torch.abs(result_signal))
+        result_signal = result_signal * 1e3
+        if torch.isnan(result_signal).any():
+            print(result_signal)
+            result_signal = torch.nan_to_num(result_signal, nan=0.0)
+
+        camera_data = np.load(camera_pose)
+        tx_data = np.loadtxt(tx_loc)
+
+        camera_data = torch.from_numpy(camera_data).to(dtype).to(device)
+        tx_data = torch.from_numpy(tx_data).to(dtype).to(device)
+
+        with torch.no_grad():
+            if motion_mask:
+                # h, w = validation_data.height // pipeline.vae_scale_factor, validation_data.width // pipeline.vae_scale_factor
+                # initial_latents = torch.randn([1, validation_data.num_frames, 4, h, w], dtype=dtype, device=device)
+                # mask = T.ToTensor()(np_mask).to(dtype).to(device)
+                # mask = T.Resize([h, w], antialias=False)(mask)
+                video_frames = MaskStableVideoDiffusionPipeline.__call__(
+                    pipeline,
+                    video=pil_images,
+                    width=validation_data.width,
+                    height=validation_data.height,
+                    num_frames=validation_data.num_frames,
+                    num_inference_steps=validation_data.num_inference_steps,
+                    decode_chunk_size=validation_data.decode_chunk_size,
+                    fps=validation_data.fps,
+                    motion_bucket_id=validation_data.motion_bucket_id,
+                    n_input_frames=validation_data.n_input_frames,
+                    signal_latent=None,
+                    signal=result_signal,
+                    infrared_video=pil_infrared_images,
+                    camera_pose=camera_data,
+                    tx_pos=tx_data,
+                    sig1=sig1,
+                    sig2=sig2,
+                    sig3=sig3,
+                    video_encoder=video_encoder,
+                    video_encoder_hidden=video_encoder_hidden,
+                    camera_fourier=camera_fourier,
+                    tx_fourier=tx_fourier,
+                    final_encoder=final_encoder,
+                    img1=img1,
+                ).frames[0]
+            else:
+                video_frames = pipeline(
+                    video=pil_images,
+                    width=validation_data.width,
+                    height=validation_data.height,
+                    num_frames=validation_data.num_frames,
+                    num_inference_steps=validation_data.num_inference_steps,
+                    fps=validation_data.fps,
+                    decode_chunk_size=validation_data.decode_chunk_size,
+                    motion_bucket_id=validation_data.motion_bucket_id,
+                ).frames[0]
+
+        if preview:
+            fps = validation_data.get('fps', 8)
+            imageio.mimwrite(target_file, video_frames, duration=int(1000 / fps), loop=0)
+            imageio.mimwrite(target_file.replace('.gif', '.mp4'), video_frames, fps=fps)
+            # resized_frames = [np.array(cv2.resize(frame, (125, 125))) for frame in np.array(video_frames)]
+            # resized_frames = np.array(resized_frames)
+            wandb.log({image: wandb.Video(target_file.replace('.gif', '.mp4'),
+                                          caption=target_file.replace('.gif', '.mp4'), format="mp4")})
+
+    return 0
+
+
+
+
+def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, final_encoder, validation_data, out_file, index, forward_t=25, preview=True):
     vae = pipeline.vae
     device = vae.device
     dtype = vae.dtype

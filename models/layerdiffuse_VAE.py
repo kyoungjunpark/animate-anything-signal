@@ -214,11 +214,11 @@ class MultiConv1DLayer(nn.Module):
 
 
 class CompactSignalTransformer2(nn.Module):
-    def __init__(self, input_size=512, target_h=1, target_w=1, channel=3, frame_step=2, n_input_frames=5, output_dim=4):
+    def __init__(self, input_size=512, target_h=1, target_w=1, frame_step=3, n_input_frames=5, output_dim=4):
         super(CompactSignalTransformer2, self).__init__()
         # self.conv1 = nn.Conv1d(in_channels=frame_step, out_channels=128, kernel_size=1, padding=1)
         # self.conv2 = nn.Conv1d(in_channels=128, out_channels=256, kernel_size=1, padding=1)
-        self.fc = nn.Linear(channel * input_size, 1024)
+        self.fc = nn.Linear(frame_step * input_size, 1024)
         self.fc2 = nn.Linear(n_input_frames * 1024, 1024)
         self.fc3 = nn.Linear(1024, target_h * target_w * output_dim)
 
@@ -701,7 +701,7 @@ class VideoEncoderHidden(nn.Module):
 
         # Encoder using 3D convolutions
         self.encoder = nn.Sequential(
-            nn.Conv3d(in_channels, 32, kernel_size=(3, 4, 4), stride=(1, 2, 2), padding=(1, 1, 1)),
+            nn.Conv3d(n_input_frames, 32, kernel_size=(3, 4, 4), stride=(1, 2, 2), padding=(1, 1, 1)),
             # (b, 32, f, h/2, w/2)
             nn.ReLU(),
             nn.Conv3d(32, 64, kernel_size=(3, 4, 4), stride=(1, 2, 2), padding=(1, 1, 1)),  # (b, 64, f, h/4, w/4)
@@ -712,21 +712,24 @@ class VideoEncoderHidden(nn.Module):
         )
 
         # Linear layer to produce a latent representation
-        self.fc_latent = nn.Linear(n_input_frames/2 * target_h / 8 * target_w / 8 * 128, latent_dim)
+        self.fc_latent = nn.Linear(2 * target_h * target_w * 128, latent_dim)
 
     def forward(self, x):
+        batch_size, frames, channels, width, height = x.shape
+
         x = self.encoder(x)
-        latent = self.fc_latent(x)
+        latent = self.fc_latent(x) # torch.Size([2, 512])
+        latent = latent.view(batch_size, 1, -1)
         return latent
 
 
 class VideoEncoder(nn.Module):
-    def __init__(self, target_h, target_w, n_input_frames=10, input_channels=3, output_dim=4):
+    def __init__(self, target_h, target_w, n_input_frames=10, n_inpt_frames=10, output_dim=4):
         super(VideoEncoder, self).__init__()
         self.output_dim = output_dim
         # Temporal encoding layer
         self.temporal_conv = nn.Conv3d(
-            in_channels=input_channels,
+            in_channels=n_inpt_frames,
             out_channels=64,
             kernel_size=(3, 3, 3),
             stride=(1, 2, 2),
@@ -753,12 +756,12 @@ class VideoEncoder(nn.Module):
         self.final_conv = nn.Conv3d(
             in_channels=256,
             out_channels=1,
-            kernel_size=(n_input_frames, 1, 1),
+            kernel_size=(1, 1, 1),  # Use 1x1x1 instead
             stride=(1, 1, 1)
         )
 
         # Output layer reshaping
-        self.pool = nn.AdaptiveAvgPool3d((1, 1, target_h // 8, target_w // 8))
+        self.pool = nn.AdaptiveAvgPool3d((1, target_h, target_w))
 
     def forward(self, x):
         # Pass through layers
@@ -767,7 +770,6 @@ class VideoEncoder(nn.Module):
         x = self.downsample2(x)
         x = self.final_conv(x)
         x = self.pool(x)
-
         return x
 
 

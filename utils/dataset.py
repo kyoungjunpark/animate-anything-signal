@@ -201,11 +201,18 @@ def get_frame_agg_signal_batch(signal_path, initial_signal_path, tx_path, camera
     return video, result_channels, camera_pose, tx_pos, frame_step, human_coords
 
 
-def get_frame_agg_infrared_batch(vr_infrared, camera_pose_path, max_frames, sample_fps, vr, transform, empty_room_ratio):
+def get_frame_agg_infrared_batch(signal_path, initial_signal_path, tx_path, vr_infrared, camera_pose_path, max_frames, sample_fps, vr, transform, empty_room_ratio):
     native_fps = vr.get_avg_fps()
     max_range = len(vr)
-    frame_step = max(1, round(native_fps / sample_fps))
+    rgb_frame_step = max(1, round(native_fps / sample_fps))
+
+    native_fps = vr_infrared.get_avg_fps()
+    max_range = len(vr_infrared)
+    inf_frame_step = max(1, round(native_fps / sample_fps))
+    frame_step = max(rgb_frame_step, inf_frame_step)
+
     frame_range = range(0, max_range, frame_step)
+
     if len(frame_range) < max_frames:
         frame_range = np.linspace(0, max_range - 1, max_frames).astype(int)
     start = random.randint(0, len(frame_range) - max_frames)
@@ -216,11 +223,30 @@ def get_frame_agg_infrared_batch(vr_infrared, camera_pose_path, max_frames, samp
     video = rearrange(frames, "f h w c -> f c h w")
     video = transform(video)
     # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # signal
+    channels = torch.load(signal_path, map_location="cuda:0", weights_only=True)
+    # Read the file and split lines
+    with open(signal_path.replace("channels.pt", "human.txt"), 'r') as f:
+        lines = f.readlines()
 
-    native_fps = vr_infrared.get_avg_fps()
-    max_range = len(vr_infrared)
-    frame_step = max(1, round(native_fps / sample_fps))
-    frame_range = range(0, max_range, frame_step)
+    # Parse the coordinates into a list of tuples by splitting on commas
+    coords = [list(map(float, line.strip().split(','))) for line in lines]
+
+    # Convert to a PyTorch tensor
+    human_coords = torch.tensor(coords).cuda()
+
+    # print("check", frame_step, start, max_frames, frame_range_indices, max_range, frame_range)
+
+    human_coords = human_coords[frame_range_indices]
+
+    camera_pose = np.load(camera_pose_path)
+    tx_pos = np.loadtxt(tx_path)
+    initial_channels = torch.load(initial_signal_path, map_location="cuda:0", weights_only=True)
+
+    initial_channels = initial_channels.unsqueeze(0)  # Now shape is (1, 512)
+    initial_channels = initial_channels.repeat(3, 1, 1)
+
+    # infrared
     if len(frame_range) < max_frames:
         frame_range = np.linspace(0, max_range - 1, max_frames).astype(int)
     start = random.randint(0, len(frame_range) - max_frames)
@@ -229,11 +255,16 @@ def get_frame_agg_infrared_batch(vr_infrared, camera_pose_path, max_frames, samp
     frame_range_indices = list(frame_range)[start:start + max_frames]
     frames = vr.get_batch(frame_range_indices)
     video_infrared = rearrange(frames, "f h w c -> f c h w")
-    video_infrared = transform(video)
+    video_infrared = transform(video_infrared)
 
     camera_pose = np.load(camera_pose_path)
 
-    return video, video_infrared, camera_pose, frame_step
+    partial_channels = channels[frame_range_indices[0]:frame_range_indices[-1] + frame_step, :]
+    result_channels = torch.cat((initial_channels, partial_channels), dim=0)  # Result shape will be (53, 512)
+    result_channels = F.pad(result_channels, (0, 0, 0, 0, (max_frames + 1) * frame_step - result_channels.size(0), 0))
+    human_coords = False
+
+    return video, video_infrared, result_channels, camera_pose, tx_pos, frame_step, human_coords
 
 
 def process_video(vid_path, use_bucketing, w, h, get_frame_buckets, get_frame_batch):
@@ -552,9 +583,10 @@ class VideoBLIPDataset_V2(Dataset):
 
         vr = decord.VideoReader(clip_path)
         # Wifi
-        if vid_data[self.sig_data_key] is not None:
-            video, signal, camera_pose, tx_pos, frame_step, infrared, human_coords = get_frame_agg_signal_batch(vid_data[self.sig_data_key], vid_data[self.initial_sig_data_key], vid_data[self.tx_pos_key],
-                                                                   vid_data[self.camera_pose_key], vid_data[self.camera_pose_key], self.n_sample_frames,
+        if vid_data[self.infrared_data_key] is None:
+            video, signal, camera_pose, tx_pos, frame_step, human_coords \
+                = get_frame_agg_signal_batch(vid_data[self.sig_data_key], vid_data[self.initial_sig_data_key],
+                                             vid_data[self.tx_pos_key], vid_data[self.camera_pose_key], self.n_sample_frames,
                                                                    self.fps, vr, self.transform, self.empty_room_ratio)
             # video = get_frame_batch(self.n_sample_frames, self.fps, vr, self.transform)
 
@@ -582,18 +614,21 @@ class VideoBLIPDataset_V2(Dataset):
             }
         elif vid_data[self.infrared_data_key] is not None:
             vr_infrared = decord.VideoReader(vid_data[self.infrared_data_key])
-            video, video_infrared, camera_pose, frame_step = get_frame_agg_infrared_batch(vr_infrared, vid_data[self.camera_pose_key], self.n_sample_frames,
-                self.fps, vr, self.transform, self.empty_room_ratio)
+            video, video_infrared, signal, camera_pose, tx_pos, frame_step, human_coords  \
+                = get_frame_agg_infrared_batch(vid_data[self.sig_data_key], vid_data[self.initial_sig_data_key],
+                                               vid_data[self.tx_pos_key], vr_infrared, vid_data[self.camera_pose_key],
+                                               self.n_sample_frames, self.fps, vr, self.transform, self.empty_room_ratio)
             # video = get_frame_batch(self.n_sample_frames, self.fps, vr, self.transform)
 
             prompt_ids = np.array(0)
             prompt = np.array(0)
-
             example = {
                 "pixel_values": normalize_input(video),
                 "pixel_values_real": video,
                 "infrared_pixel_values": normalize_input(video_infrared),
+                "signal_values": signal,
                 "camera_pose": camera_pose,
+                "tx_pos": tx_pos,
                 "prompt_ids": prompt_ids,
                 "text_prompt": prompt,
                 "frame_step": frame_step,
