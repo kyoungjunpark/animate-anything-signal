@@ -917,9 +917,10 @@ def main(
                         curr_dataset_name = batch['dataset'][0]
                         save_filename = f"{global_step}_dataset-{curr_dataset_name}"
                         out_file = f"{output_dir}/samples/"
+
                         eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, validation_data, out_file, global_step)
                         logger.info(f"Saved a new sample to {out_file}")
-                        if global_step > 2000:
+                        if global_step < 10 or global_step > 2000:
                             fvd = eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor,
                                                         sig1, sig2,
                                                         sig3, camera_fourier, tx_fourier, img1, None,
@@ -947,9 +948,7 @@ def main(
             accelerator.unwrap_model(sig3),
             accelerator.unwrap_model(camera_fourier),
             accelerator.unwrap_model(tx_fourier),
-
             accelerator.unwrap_model(img1),
-
             output_dir,
             is_checkpoint=False,
             save_pretrained_model=save_pretrained_model
@@ -1232,6 +1231,7 @@ def eval_optical_flow(real_videos, fake_videos):
             mask_final = real_mask | fake_mask
             # print(int(real_video.size(3) / 30), len(real_mask), len(fake_mask), len(mask_final))
             # 17 48 48 69
+            assert len(mask_final) < 256, (real_mask, fake_mask)
             trajs_real = run_model(model, real_video, N, None, None, mask_final)  # torch.Size([1, 8, 3, 360, 640])
             trajs_fake = run_model(model, fake_video, N, None, None, mask_final)
 
@@ -1241,7 +1241,8 @@ def eval_optical_flow(real_videos, fake_videos):
 
             # trajs_real = trajs_real * mask_final
             # trajs_fake = trajs_fake * mask_final
-
+            print("Calculate fastdtw for ", trajs_real.size(2))
+            distance_tmp = []
             for i in range(trajs_real.size(2)):  # 256 dimension (index 2)
                 slice_real = trajs_real[0, :, i, :]
                 slice_fake = trajs_fake[0, :, i, :]
@@ -1254,17 +1255,18 @@ def eval_optical_flow(real_videos, fake_videos):
                 # slice_fake = [slice_fake[i] for i in indices]
 
                 distance, path = fastdtw(slice_real, slice_fake, dist=euclidean)
-                total_distance1.append(distance)
+                distance_tmp.append(distance)
+            total_distance1.append(np.mean(distance_tmp))
 
-                 #distance2, path = fastdtw(slice_real, slice_fake2, dist=euclidean)
-                # total_distance2.append(distance2)
+            #distance2, path = fastdtw(slice_real, slice_fake2, dist=euclidean)
+            # total_distance2.append(distance2)
 
-    # fid_results = np.sum(fid_avg) / len(fid_avg)
+    # fid_results = np.sum(fid_avg) / lefvn(fid_avg)
     # print("score: ", np.sum(total_distance1) / N)
-    return np.mean(total_distance1)
+    return np.median(total_distance1)
 
 
-def process_video_tensor(input_tensor, num_frames=8, similarity_threshold=0.99, block_size=16):
+def process_video_tensor(input_tensor, num_frames=8, similarity_threshold=0.99, block_size=16, top_ratio=0.01):
     """
     Process the input tensor of shape (1, 8, 3, 360, 640), where:
     - 1: batch size (can be adjusted)
@@ -1331,7 +1333,7 @@ def process_video_tensor(input_tensor, num_frames=8, similarity_threshold=0.99, 
     # Sort blocks by score (highest motion score first)
     motion_block_scores.sort(key=lambda x: x[1], reverse=True)
     # Select the top 10% most dynamic blocks
-    num_top_blocks = int(len(motion_block_scores) * 0.05)
+    num_top_blocks = int(len(motion_block_scores) * top_ratio)
     top_blocks = set([motion_block_scores[i][0] for i in range(num_top_blocks)])
     # Create the mask to black out dynamic parts in each frame (based on blocks)
     masked_frames = []

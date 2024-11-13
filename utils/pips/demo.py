@@ -66,44 +66,6 @@ def run_model(model, rgbs, N, sw, gif_name, masked_coord):
                                                                                             W + pad * 2)
     trajs_e = trajs_e + pad
 
-    # B,S,N,2, where, S is the sequence length and N is the number of particles, and 2 is the x and y coordinates.
-    # exit(1)
-    if sw is not None and sw.save_this:
-        linewidth = 2
-
-        # visualize the input
-        o1 = sw.summ_rgbs('inputs/rgbs', preprocess_color(rgbs[0:1]).unbind(1))
-        # visualize the trajs overlaid on the rgbs
-        o2 = sw.summ_traj2ds_on_rgbs('outputs/trajs_on_rgbs', trajs_e[0:1], preprocess_color(rgbs[0:1]),
-                                     cmap='spring', linewidth=linewidth)
-        # visualize the trajs alone
-        o3 = sw.summ_traj2ds_on_rgbs('outputs/trajs_on_black', trajs_e[0:1], torch.ones_like(rgbs[0:1]) * -0.5,
-                                     cmap='spring', linewidth=linewidth)
-        # concat these for a synced wide vis
-        wide_cat = torch.cat([o1, o2, o3], dim=-1)
-        sw.summ_rgbs('outputs/wide_cat', wide_cat.unbind(1))
-
-        # write to disk, in case that's more convenient
-        wide_list = list(wide_cat.unbind(1))
-        wide_list = [wide[0].permute(1, 2, 0).cpu().numpy() for wide in wide_list]
-        wide_list = [Image.fromarray(wide) for wide in wide_list]
-        out_fn = './out_%s.gif' % gif_name
-        wide_list[0].save(out_fn, save_all=True, append_images=wide_list[1:])
-        print('saved %s' % out_fn)
-
-        # alternate vis
-        sw.summ_traj2ds_on_rgbs2('outputs/trajs_on_rgbs2', trajs_e[0:1], vis_e[0:1],
-                                 preprocess_color(rgbs[0:1]))
-
-        # animation of inference iterations
-        rgb_vis = []
-        for trajs_e_ in preds_anim:
-            trajs_e_ = trajs_e_ + pad
-            rgb_vis.append(
-                sw.summ_traj2ds_on_rgb('', trajs_e_[0:1], torch.mean(preprocess_color(rgbs[0:1]), dim=1),
-                                       cmap='spring', linewidth=linewidth, only_return=True))
-        sw.summ_rgbs('outputs/animated_trajs_on_rgb', rgb_vis)
-
     return trajs_e
 
 
