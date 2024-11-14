@@ -268,6 +268,45 @@ def get_frame_agg_infrared_batch(signal_path, initial_signal_path, tx_path, vr_i
     return video, video_infrared, result_channels, camera_pose, tx_pos, frame_step, human_coords
 
 
+def get_frame_agg_infrared_real_batch(vr_infrared, max_frames, sample_fps, vr, transform, empty_room_ratio):
+    native_fps = vr.get_avg_fps()
+    max_range = len(vr)
+    rgb_frame_step = max(1, round(native_fps / sample_fps))
+
+    native_fps = vr_infrared.get_avg_fps()
+    max_range = len(vr_infrared)
+    inf_frame_step = max(1, round(native_fps / sample_fps))
+    # frame_step = max(rgb_frame_step, inf_frame_step)
+    frame_step = 3
+
+    frame_range = range(0, max_range, frame_step)
+
+    if len(frame_range) < max_frames:
+        frame_range = np.linspace(0, max_range - 1, max_frames).astype(int)
+    start = random.randint(0, len(frame_range) - max_frames)
+    # start = 0
+    # start = len(frame_range) - max_frames
+    frame_range_indices = list(frame_range)[start:start + max_frames]
+    frames = vr.get_batch(frame_range_indices)
+    video = rearrange(frames, "f h w c -> f c h w")
+    video = transform(video)
+    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
+    # infrared
+    if len(frame_range) < max_frames:
+        frame_range = np.linspace(0, max_range - 1, max_frames).astype(int)
+    start = random.randint(0, len(frame_range) - max_frames)
+    # start = 0
+    # start = len(frame_range) - max_frames
+    frame_range_indices = list(frame_range)[start:start + max_frames]
+    frames = vr.get_batch(frame_range_indices)
+    video_infrared = rearrange(frames, "f h w c -> f c h w")
+    video_infrared = transform(video_infrared)
+
+    return video, video_infrared, frame_step
+
+
 def process_video(vid_path, use_bucketing, w, h, get_frame_buckets, get_frame_batch):
     if use_bucketing:
         vr = decord.VideoReader(vid_path)
@@ -613,7 +652,7 @@ class VideoBLIPDataset_V2(Dataset):
                 "pixel_values_path": clip_path,
                 'dataset': self.__getname__(),
             }
-        elif vid_data[self.infrared_data_key] is not None:
+        elif vid_data[self.infrared_data_key] is not None and vid_data[self.sig_data_key] is not None:
             vr_infrared = decord.VideoReader(vid_data[self.infrared_data_key])
             video, video_infrared, signal, camera_pose, tx_pos, frame_step, human_coords  \
                 = get_frame_agg_infrared_batch(vid_data[self.sig_data_key], vid_data[self.initial_sig_data_key],
@@ -630,6 +669,28 @@ class VideoBLIPDataset_V2(Dataset):
                 "signal_values": signal,
                 "camera_pose": camera_pose,
                 "tx_pos": tx_pos,
+                "prompt_ids": prompt_ids,
+                "text_prompt": prompt,
+                "frame_step": frame_step,
+                "pixel_values_path": clip_path,
+                "infrared_pixel_values_path": vid_data[self.infrared_data_key],
+                'dataset': self.__getname__(),
+            }
+        elif vid_data[self.infrared_data_key] is not None and vid_data[self.sig_data_key] is None:
+            vr_infrared = decord.VideoReader(vid_data[self.infrared_data_key])
+            video, video_infrared, frame_step  \
+                = get_frame_agg_infrared_real_batch(vr_infrared, self.n_sample_frames, self.fps, vr, self.transform, self.empty_room_ratio)
+            # video = get_frame_batch(self.n_sample_frames, self.fps, vr, self.transform)
+
+            prompt_ids = np.array(0)
+            prompt = np.array(0)
+            example = {
+                "pixel_values": normalize_input(video),
+                "pixel_values_real": video,
+                "infrared_pixel_values": normalize_input(video_infrared),
+                "signal_values": None,
+                "camera_pose": None,
+                "tx_pos": None,
                 "prompt_ids": prompt_ids,
                 "text_prompt": prompt,
                 "frame_step": frame_step,

@@ -808,7 +808,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("infrared_vanila_empty0.05_metrics_videomae_focused")
+        accelerator.init_trackers("vanila_empty0.05_metrics_videomae_focused")
         wandb.login(key="a94ace7392048e560ce6962a468101c6f0158b55")
         wandb.require("core")
 
@@ -920,7 +920,7 @@ def main(
 
                         eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, validation_data, out_file, global_step)
                         logger.info(f"Saved a new sample to {out_file}")
-                        if global_step < 10 or global_step > 2000:
+                        if global_step > 2000:
                             fvd = eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor,
                                                         sig1, sig2,
                                                         sig3, camera_fourier, tx_fourier, img1, None,
@@ -964,6 +964,8 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
     diffusion_scheduler = pipeline.scheduler
     diffusion_scheduler.set_timesteps(validation_data.num_inference_steps, device=device)
 
+    frame_step = validation_data.frame_step
+
     # prompt = validation_data.prompt
     # scale = math.sqrt(width * height / (validation_data.height * validation_data.width))
     # block_size = 64
@@ -997,7 +999,6 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
 
         # pimg = Image.open(image)
         vr = decord.VideoReader(image)
-        frame_step = 3
         frame_range = list(range(0, len(vr), frame_step))
         frames = vr.get_batch(frame_range[0:validation_data.num_frames])
 
@@ -1098,9 +1099,9 @@ def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, s
     for step, batch in enumerate(tqdm(test_dataloader)):
         pixel_values = batch['pixel_values'].to(dtype)
         image_path = batch['pixel_values_path']
-        bsz, num_frames = pixel_values.shape[:2]
+        # image
         vr = decord.VideoReader(image_path[0])
-        frame_step = 3
+        frame_step = validation_data.frame_step
         frame_range = list(range(0, len(vr), frame_step))
         frames = vr.get_batch(frame_range[0:validation_data.num_frames])
 
@@ -1156,23 +1157,26 @@ def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, s
         # Stack the tensors into a single tensor (batch of images)
         transform = transforms.ToTensor()
         # Convert each image in the list to a tensor
-        video_frames = [transform(image) for image in video_frames]
+        # video_frames = [transform(image) for image in video_frames]
         # Stack the list of tensors into a single tensor
-        video_frames = torch.stack(video_frames)
+        # video_frames = torch.stack(video_frames)
 
+        video_frames = torch.stack([torch.from_numpy(np.array(img)) for img in video_frames])
+        video_frames = video_frames.permute(0, 3, 1, 2)  # (batch_size, H, W, C) -> (batch_size, C, H, W)
         vae_scale_factor = 2 ** (len(vae.config.block_out_channels) - 1)
         image_processor = VaeImageProcessor(vae_scale_factor=vae_scale_factor)
         # print("2", pil_images[0])
         transform = T.Compose([
             # T.RandomResizedCrop(size=(height, width), scale=(0.8, 1.0), ratio=(width/height, width/height), antialias=False)
             T.Resize(min(validation_data.height, validation_data.width), antialias=False),
-            T.CenterCrop([validation_data.height, validation_data.width]),
-            T.ToTensor()
         ])
-        pil_images = [transform(image) for image in pil_images]
+        pil_images = torch.stack([torch.from_numpy(np.array(img.resize((validation_data.width, validation_data.height)))) for img in pil_images])
+        pil_images = pil_images.permute(0, 3, 1, 2)  # (batch_size, H, W, C) -> (batch_size, C, H, W)
+
+        # pil_images = [transform(image) for image in pil_images]
 
         # Stack the list of tensors into a single tensor
-        pil_images = torch.stack(pil_images)
+        # pil_images = torch.stack(pil_images)
 
         pil_images = pil_images.squeeze(1)
         if pil_images.size(0) < video_frames.size(0):
@@ -1261,7 +1265,7 @@ def eval_optical_flow(real_videos, fake_videos):
             #distance2, path = fastdtw(slice_real, slice_fake2, dist=euclidean)
             # total_distance2.append(distance2)
 
-    # fid_results = np.sum(fid_avg) / lefvn(fid_avg)
+    # fid_results = np.sum(fid_avg) / len(fid_avg)
     # print("score: ", np.sum(total_distance1) / N)
     return np.median(total_distance1)
 
@@ -1333,7 +1337,7 @@ def process_video_tensor(input_tensor, num_frames=8, similarity_threshold=0.99, 
     # Sort blocks by score (highest motion score first)
     motion_block_scores.sort(key=lambda x: x[1], reverse=True)
     # Select the top 10% most dynamic blocks
-    num_top_blocks = int(len(motion_block_scores) * top_ratio)
+    num_top_blocks = max(1, int(len(motion_block_scores) * top_ratio))
     top_blocks = set([motion_block_scores[i][0] for i in range(num_top_blocks)])
     # Create the mask to black out dynamic parts in each frame (based on blocks)
     masked_frames = []
