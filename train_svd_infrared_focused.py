@@ -578,6 +578,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     signal_embeddings = signal_embeddings.reshape(bsz, 1, -1)
 
     encoder_hidden_states = torch.cat((signal_embeddings, infrared_hidden_embeddings), dim=2)
+    encoder_hidden_states = encoder_hidden_states.repeat_interleave(repeats=num_frames, dim=0)
 
     uncond_hidden_states = torch.zeros_like(encoder_hidden_states)
 
@@ -587,8 +588,6 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     # here for initial signal embedding
     signal_initial_latent = signal_encoder3(signal_values_reshaped_input)
     signal_initial_latent = signal_initial_latent.repeat(1, num_frames, 1, 1, 1) # condition_latent torch.Size([1, 50, 20, 8, 8])
-
-    encoder_hidden_states = encoder_hidden_states.repeat_interleave(repeats=num_frames, dim=0)
 
     # Whole signal embedding
     signal_embeddings2 = signal_encoder2(deducted_signal)
@@ -1220,6 +1219,8 @@ def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, s
     videos2 = []
     for step, batch in enumerate(tqdm(test_dataloader)):
         image_path = batch['pixel_values_path']
+        infrared_image_path = batch['infrared_pixel_values_path']
+
         # image
         vr = decord.VideoReader(image_path[0])
         frame_step = validation_data.frame_step
@@ -1338,11 +1339,10 @@ def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, s
 
         videos1.append(pil_images)
         videos2.append(video_frames)
-    # video_frames torch.Size([25, 3, 512, 512])
-    # pil_images torch.Size([25, 3, 480, 640]) -> resized to 512, 512
+
     videos1 = torch.stack(videos1)
     videos2 = torch.stack(videos2)
-    # print("final: ", videos1.size(), videos2.size())
+
     evaluator.empty_fake_stats()
     evaluator.compute_fake_stats(evaluator.load_videos(".pt", data_type="video_torch", video_data=videos2))
     score_fvd = evaluator.compute_fvd_from_stats()

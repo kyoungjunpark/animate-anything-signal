@@ -62,7 +62,7 @@ from fastdtw import fastdtw
 from scipy.spatial.distance import euclidean
 from utils.pips.demo import run_model
 from utils.pips.nets.pips import Pips
-from models.pipeline_infrared import MaskStableVideoDiffusionPipeline
+from models.pipeline_infrared_real import MaskStableVideoDiffusionPipeline
 
 decord.bridge.set_bridge('torch')
 
@@ -157,9 +157,10 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
     tx_fourier_embedder = FourierEmbedder(num_freqs=fourier_freqs, output_dim=3*fourier_freqs*2, temperature=2, target_h=width // 8, target_w=height // 8)
 
     video_encoder = VideoEncoder(target_h=width // 8, target_w=height // 8)
-    video_encoder_hidden = VideoEncoderHidden(target_h=width // 8, target_w=height // 8, n_input_frames=n_input_frames, latent_dim=512)
+    video_encoder_hidden = VideoEncoderHidden(target_h=width // 8, target_w=height // 8
+                                              , n_input_frames=n_input_frames, latent_dim=1024)
 
-    final_encoder = MultiConv1DLayer(in_channels=12)
+    final_encoder = MultiConv1DLayer(in_channels=2)
 
     return pipeline, None, pipeline.feature_extractor, pipeline.scheduler, pipeline.image_processor, \
            pipeline.image_encoder, pipeline.vae, pipeline.unet, signal_encoder, signal_encoder2, signal_encoder3, \
@@ -491,9 +492,6 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     latents = vae.encode(frames).latent_dist.mode() * vae.config.scaling_factor
     latents = rearrange(latents, '(b f) c h w-> b f c h w', b=bsz)  # 1 Channel
 
-    signal_encoder = sig1.to(latents.device).to(dtype)
-    signal_encoder2 = sig2.to(latents.device).to(dtype)
-    signal_encoder3 = sig3.to(latents.device).to(dtype)
 
     camera_fourier = camera_fourier.to(latents.device).to(dtype)
     tx_fourier = tx_fourier.to(latents.device).to(dtype)
@@ -547,80 +545,22 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     infrared_embeddings = video_encoder(infrared_images)
     infrared_embeddings = infrared_embeddings.repeat(1, num_frames, 1, 1, 1) # condition_latent torch.Size([1, 50, 20, 8, 8])
 
-    # Signal embedding
-    assert "frame_step" in batch.keys(), batch.keys()
-    frame_step = batch["frame_step"][0].item()
-    # print("frame_step", frame_step)
-    signal_values = torch.real(batch['signal_values']).float().half()  # [B, FPS * frame_step, 512]
-    # signal_values = signal_values * 1e4
-    # signal_values = log_scale_tensor(torch.abs(signal_values) * 1e3)
-    signal_values = signal_values * 1e3
-
-    if torch.isnan(signal_values).any():
-        print(signal_values)
-        signal_values = torch.nan_to_num(signal_values, nan=0.0)
-
-    # signal_encoder = LatentSignalEncoder(input_dim=signal_values.size(-1) * signal_values.size(-2), output_dim=1024).to(device)
-    # signal_encoder2 = LatentSignalEncoder(output_dim=input_latents.size(-1) * input_latents.size(-2)).to(device)
-
-    # [B, FPS, 512] -> [B * FPS, 512]
-    # print(signal_values.size())
-    # print("0", signal_values.size())  # torch.Size([2, 75, 512])
-    signal_values_reshaped = rearrange(signal_values, 'b (f c) h r-> b f c (h r)', c=frame_step)  # [B, FPS, 32]
-    # print("0.5", signal_values_reshaped.size())  # torch.Size([2, 5, 3, 512])
-    # print("signal_values_reshaped", signal_values_reshaped.size())
-    init_signals = signal_values_reshaped[:, 0].unsqueeze(1)
-    # (2,25,3,512*4) - (2,512*4)
-    deducted_signal = signal_values_reshaped[:, 1:] - init_signals
-    signal_values_reshaped_input = signal_values_reshaped[:, :n_input_frames+1]
-
-    signal_embeddings = signal_encoder(signal_values_reshaped_input)
-    signal_embeddings = signal_embeddings.reshape(bsz, 1, -1)
-
-    encoder_hidden_states = torch.cat((signal_embeddings, infrared_hidden_embeddings), dim=2)
+    encoder_hidden_states = infrared_hidden_embeddings
+    encoder_hidden_states = encoder_hidden_states.repeat_interleave(repeats=num_frames, dim=0)
 
     uncond_hidden_states = torch.zeros_like(encoder_hidden_states)
 
     if random.random() < 0.15:
         encoder_hidden_states = uncond_hidden_states
 
-    # here for initial signal embedding
-    signal_initial_latent = signal_encoder3(signal_values_reshaped_input)
-    signal_initial_latent = signal_initial_latent.repeat(1, num_frames, 1, 1, 1) # condition_latent torch.Size([1, 50, 20, 8, 8])
-
-    encoder_hidden_states = encoder_hidden_states.repeat_interleave(repeats=num_frames, dim=0)
-
-    # Whole signal embedding
-    signal_embeddings2 = signal_encoder2(deducted_signal)
-    # signal_embeddings2 = signal_embeddings2.repeat(1, num_frames, 1, 1, 1) # condition_latent torch.Size([1, 50, 20, 8, 8])
-
-    signal_latent = signal_embeddings2
-    # Add noise to the latents according to the noise magnitude at each timestep
-    # (this is the forward diffusion process) #[bsz, f, c, h , w]
-
-    # input_latents:  torch.Size([2, 25, 8, 64, 64])
-    # signal_embeddings2: torch.Size([2, 25, 8 -> 1, 64, 64])
-    # print("signal_embeddings2", signal_embeddings2.size())
-    # print("final latents ", input_latents.size()) # final latents  torch.Size([2, 25, 9, 64, 64])
-
-    # Fourier embedding
-    camera_pose = batch['camera_pose'].float().half()
-    tx_pos = batch['tx_pos'].float().half()
-
-    camera_latent = camera_fourier(camera_pose)
-    tx_latent = tx_fourier(tx_pos)
-
-    camera_latent = camera_latent.repeat(1, num_frames, 1, 1, 1) # condition_latent torch.Size([1, 50, 20, 8, 8])
-    tx_latent = tx_latent.repeat(1, num_frames, 1, 1, 1)  # condition_latent torch.Size([1, 50, 20, 8, 8])
-    # pos_latent = torch.cat((camera_latent, tx_latent), dim=3)
     motion_bucket_id = 127
     fps = 6
     added_time_ids = pipeline._get_add_time_ids(fps, motion_bucket_id,
-                                                noise_aug_strength, signal_embeddings.dtype, bsz, 1, False)
+                                                noise_aug_strength, infrared_embeddings.dtype, bsz, 1, False)
     added_time_ids = added_time_ids.to(device)
 
     loss = 0
-    final_input = torch.cat([camera_latent, tx_latent, signal_initial_latent, signal_latent, images_latent, infrared_embeddings], dim=2)
+    final_input = torch.cat([images_latent, infrared_embeddings], dim=2)
     final_input = final_encoder(final_input)
     # print(signal_initial_latent.size(), signal_latent.size(), images_latent.size(), input_latents.size())
     # torch.Size([2, 25, 1, 64, 64]) torch.Size([2, 25, 1, 64, 64]) torch.Size([2, 25, 5, 64, 64]) torch.Size([2, 25, 8, 64, 64])
@@ -789,7 +729,7 @@ def main(
         # DataLoaders creation:
 
     # Define the split sizes
-    n = 5
+    n = 50
     interval = len(train_dataset) // n
     test_dataset = [train_dataset[i] for i in range(0, len(train_dataset), interval)][:n]
 
@@ -809,10 +749,10 @@ def main(
     if accelerator.is_main_process:
         from utils.cdfvd import fvd
         evaluator = fvd.cdfvd('videomae', ckpt_path='vit_g_hybrid_pt_1200e_ssv2_ft', n_fake='full')
-        if not os.path.exists("fvd_real_infrared.stat"):
+        if not os.path.exists("fvd_real_infrared_water.stat"):
             real_videos = []
             for step, batch in enumerate(tqdm(train_dataloader)):
-                if step >= 500:
+                if step >= 100:
                     break
                 pixel_values_real = batch['pixel_values_real']
                 """
@@ -840,11 +780,11 @@ def main(
             real_videos = torch.stack(real_videos)
             real_videos = rearrange(real_videos, "b1 b2 f c h w -> (b1 b2) f c h w")
             evaluator.compute_real_stats(evaluator.load_videos(".pt", data_type="video_torch", video_data=real_videos))
-            evaluator.save_real_stats("fvd_real_infrared.stat")
+            evaluator.save_real_stats("fvd_real_infrared_water.stat")
             # # Shape: (1, T, C, H, W)
             del real_videos
         else:
-            evaluator.load_real_stats("fvd_real_infrared.stat")
+            evaluator.load_real_stats("fvd_real_infrared_water.stat")
 
     # Prepare everything with our `accelerator`.
     unet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
@@ -873,7 +813,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("infrared_c9_0.05empty_lr5e6_videomae_focused")
+        accelerator.init_trackers("infrared_real_water")
         wandb.login(key="a94ace7392048e560ce6962a468101c6f0158b55")
         wandb.require("core")
 
@@ -987,7 +927,7 @@ def main(
                         curr_dataset_name = batch['dataset'][0]
                         save_filename = f"{global_step}_dataset-{curr_dataset_name}"
                         out_file = f"{output_dir}/samples/"
-                        if global_step > 2000:
+                        if global_step > 10000:
                             fvd = eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor,
                                                         sig1, sig2, sig3, video_encoder, video_encoder_hidden,
                                                         camera_fourier, tx_fourier, img1, final_encoder,
@@ -1060,13 +1000,7 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, video_encoder, video_encoder
     for image in sorted(validation_data.prompt_image):
         # print(out_file)
         # print(image)
-        infrared = image.replace(".mp4", "_i.mp4")
-
-        signal = image.replace(".mp4", ".pt")
-        initial_signal = signal.replace(".pt", "_init.pt")
-
-        camera_pose = image.replace(".mp4", ".npy")
-        tx_loc = image.replace(".mp4", ".txt")
+        infrared = image.replace("rgb", "inf")
 
         image_replaced = image.replace("frame", str(index) + "_frame").replace('.mp4', '.gif')
         target_file = out_file + image_replaced
@@ -1114,26 +1048,6 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, video_encoder, video_encoder
         # pil_infrared_images = torch.stack(pil_infrared_images)
         # pil_infrared_images = pil_infrared_images.unsqueeze(0)
 
-        signal = torch.real(torch.load(signal, map_location="cuda:0", weights_only=True)).to(dtype).to(device)
-        initial_signal = torch.real(torch.load(initial_signal, map_location="cuda:0", weights_only=True)).to(dtype).to(device)
-        initial_channels = initial_signal.unsqueeze(0)  # Now shape is (1, 512)
-        initial_channels = initial_channels.repeat(validation_data.frame_step, 1, 1)
-        # torch.Size([154, 512, 4]) torch.Size([3, 512, 4])
-
-        result_signal = torch.cat((initial_channels, signal), dim=0)  # Result shape will be (53, 512)
-        # result_signal = signal - initial_channels
-        # result_signal = result_signal * 1e4
-        # result_signal = log_scale_tensor(torch.abs(result_signal))
-        result_signal = result_signal * 1e3
-        if torch.isnan(result_signal).any():
-            print(result_signal)
-            result_signal = torch.nan_to_num(result_signal, nan=0.0)
-
-        camera_data = np.load(camera_pose)
-        tx_data = np.loadtxt(tx_loc)
-
-        camera_data = torch.from_numpy(camera_data).to(dtype).to(device)
-        tx_data = torch.from_numpy(tx_data).to(dtype).to(device)
 
         with torch.no_grad():
             if motion_mask:
@@ -1154,10 +1068,10 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, video_encoder, video_encoder
                     motion_bucket_id=validation_data.motion_bucket_id,
                     n_input_frames=validation_data.n_input_frames,
                     signal_latent=None,
-                    signal=result_signal,
+                    signal=None,
                     infrared_video=pil_infrared_images,
-                    camera_pose=camera_data,
-                    tx_pos=tx_data,
+                    camera_pose=None,
+                    tx_pos=None,
                     sig1=sig1,
                     sig2=sig2,
                     sig3=sig3,
@@ -1220,6 +1134,8 @@ def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, s
     videos2 = []
     for step, batch in enumerate(tqdm(test_dataloader)):
         image_path = batch['pixel_values_path']
+        infrared_image_path = batch['infrared_pixel_values_path']
+
         # image
         vr = decord.VideoReader(image_path[0])
         frame_step = validation_data.frame_step
@@ -1235,12 +1151,6 @@ def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, s
             frame = frames[i]  # Get the i-th frame, shape (height, width, 3)
             pil_image = Image.fromarray(frame)  # Convert to PIL.Image
             pil_images.append(pil_image)
-
-        result_signal = torch.real(batch['signal_values']).float().half().squeeze(0)
-        result_signal = result_signal * 1e3
-        if torch.isnan(result_signal).any():
-            print(result_signal)
-            result_signal = torch.nan_to_num(result_signal, nan=0.0)
 
         # infrared
         vr = decord.VideoReader(infrared_image_path[0])
@@ -1260,9 +1170,6 @@ def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, s
             # pil_image = rearrange(pil_image, 'h w c-> c h w').to(dtype)
             pil_infrared_images.append(pil_image)
 
-        camera_data = batch['camera_pose'].float().half().to(device).squeeze(0)
-        tx_data = batch['tx_pos'].float().half().to(dtype).to(device).squeeze(0)
-
         with torch.no_grad():
             # h, w = validation_data.height // pipeline.vae_scale_factor, validation_data.width // pipeline.vae_scale_factor
             # initial_latents = torch.randn([1, validation_data.num_frames, 4, h, w], dtype=dtype, device=device)
@@ -1281,10 +1188,10 @@ def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, s
                 motion_bucket_id=validation_data.motion_bucket_id,
                 n_input_frames=validation_data.n_input_frames,
                 signal_latent=None,
-                signal=result_signal,
+                signal=None,
                 infrared_video=pil_infrared_images,
-                camera_pose=camera_data,
-                tx_pos=tx_data,
+                camera_pose=None,
+                tx_pos=None,
                 sig1=sig1,
                 sig2=sig2,
                 sig3=sig3,

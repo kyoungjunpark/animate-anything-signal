@@ -1015,10 +1015,6 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
         # video = transform(video)
         # video = normalize_input(video)
 
-        camera_data = np.load(camera_pose)
-
-        camera_data = torch.from_numpy(camera_data).to(dtype).to(device)
-
         with torch.no_grad():
             if motion_mask:
                 # h, w = validation_data.height // pipeline.vae_scale_factor, validation_data.width // pipeline.vae_scale_factor
@@ -1205,7 +1201,7 @@ def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, s
     return score_fvd
 
 
-def eval_optical_flow(real_videos, fake_videos):
+def eval_optical_flow(real_videos, fake_videos, num_frames = 8):
     # # torch.Size([11, 25, 3, 64, 64]) torch.Size([11, 25, 3, 64, 64])
     model = Pips(stride=4).cuda()
     parameters = list(model.parameters())
@@ -1222,7 +1218,6 @@ def eval_optical_flow(real_videos, fake_videos):
             fake_video = fake_videos[video_idx].unsqueeze(0)
 
             # print(trajs_e.size())  # torch.Size([1, 8, 256, 2])
-            num_frames = 8
             real_video = real_video[:, ::3, :, :, :][:, :num_frames, :, :, :]  # Shape: [1, 8, 3, 360, 640]
             fake_video = fake_video[:, ::3, :, :, :][:, :num_frames, :, :, :]  # Shape: [1, 8, 3, 360, 640]
 
