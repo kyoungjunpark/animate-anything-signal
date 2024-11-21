@@ -248,9 +248,9 @@ def get_frame_agg_infrared_batch(signal_path, initial_signal_path, tx_path, vr_i
     initial_channels = initial_channels.repeat(3, 1, 1)
 
     # infrared
-    if len(frame_range) < max_frames:
-        frame_range = np.linspace(0, max_range - 1, max_frames).astype(int)
-    start = random.randint(0, len(frame_range) - max_frames)
+    # if len(frame_range) < max_frames:
+    #     frame_range = np.linspace(0, max_range - 1, max_frames).astype(int)
+    # start = random.randint(0, len(frame_range) - max_frames)
     # start = 0
     # start = len(frame_range) - max_frames
     frame_range_indices = list(frame_range)[start:start + max_frames]
@@ -294,9 +294,9 @@ def get_frame_agg_infrared_real_batch(vr_infrared, max_frames, sample_fps, vr, t
 
 
     # infrared
-    if len(frame_range) < max_frames:
-        frame_range = np.linspace(0, max_range - 1, max_frames).astype(int)
-    start = random.randint(0, len(frame_range) - max_frames)
+    # if len(frame_range) < max_frames:
+    #     frame_range = np.linspace(0, max_range - 1, max_frames).astype(int)
+    # start = random.randint(0, len(frame_range) - max_frames)
     # start = 0
     # start = len(frame_range) - max_frames
     frame_range_indices = list(frame_range)[start:start + max_frames]

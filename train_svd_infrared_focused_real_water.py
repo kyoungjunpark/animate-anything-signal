@@ -733,7 +733,6 @@ def main(
     interval = len(train_dataset) // n
     test_dataset = [train_dataset[i] for i in range(0, len(train_dataset), interval)][:n]
 
-
     # Split the dataset
     test_dataloader = torch.utils.data.DataLoader(
         test_dataset,
@@ -927,7 +926,7 @@ def main(
                         curr_dataset_name = batch['dataset'][0]
                         save_filename = f"{global_step}_dataset-{curr_dataset_name}"
                         out_file = f"{output_dir}/samples/"
-                        if global_step > 10000:
+                        if global_step < 10 or global_step > 8000:
                             fvd = eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor,
                                                         sig1, sig2, sig3, video_encoder, video_encoder_hidden,
                                                         camera_fourier, tx_fourier, img1, final_encoder,
