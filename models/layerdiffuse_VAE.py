@@ -816,15 +816,16 @@ class CompactImageReduction(nn.Module):
 
 
 class CompactImageReduction2(nn.Module):
-    def __init__(self, input_dim=4, target_h=1, target_w=1, n_input_frames=5, frame_step=2):
+    def __init__(self, input_dim=4, target_h=1, target_w=1, n_input_frames=5, frame_step=2, encoder_hidden_states=1024):
         super(CompactImageReduction2, self).__init__()
         self.conv = nn.Conv2d(in_channels=input_dim, out_channels=1, kernel_size=1)
-        self.fc2 = nn.Linear(n_input_frames * target_h * target_w, 1024)
+        self.fc2 = nn.Linear(n_input_frames * target_h * target_w, encoder_hidden_states)
 
         self.target_h = target_h
         self.target_w = target_w
         self.n_input_frames = n_input_frames
         self.silu = nn.SiLU()
+        self.encoder_hidden_states = encoder_hidden_states
 
     def forward(self, x):
         batch_size, frames, channels, width, height = x.shape
@@ -838,7 +839,7 @@ class CompactImageReduction2(nn.Module):
         x = x.view(batch_size, -1)
         x = self.fc2(x)
 
-        x = x.view(batch_size, 1, 1, 1024)
+        x = x.view(batch_size, 1, 1, self.encoder_hidden_states)
 
         return x
 

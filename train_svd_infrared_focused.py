@@ -872,7 +872,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("infrared_c9_0.05empty_lr5e6_videomae_focused")
+        accelerator.init_trackers("infrared_sim_ours")
         wandb.login(key="a94ace7392048e560ce6962a468101c6f0158b55")
         wandb.require("core")
 
@@ -1245,8 +1245,6 @@ def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, s
 
         # infrared
         vr = decord.VideoReader(infrared_image_path[0])
-        frame_step = validation_data.frame_step
-        frame_range = list(range(0, len(vr), frame_step))
         frames = vr.get_batch(frame_range[0:validation_data.num_frames])
 
         if isinstance(frames, torch.Tensor):

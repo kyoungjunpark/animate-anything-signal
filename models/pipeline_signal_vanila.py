@@ -113,14 +113,6 @@ def load_channel(channels, frame_step, frame_range_indices):
     return partial_channels
 
 
-def load_channel2(channels, frame_step, frame_range_indices):
-    partial_channels = channels[frame_range_indices[0]:frame_range_indices[-1] + frame_step, :]
-
-    partial_channels = F.pad(partial_channels, (0, 0, 0, 75 - partial_channels.size(0)))
-
-    return partial_channels
-
-
 class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
     model_cpu_offload_seq = "image_encoder->unet->vae"
     _callback_tensor_inputs = ["latents"]
@@ -447,21 +439,6 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         guidance_scale = _append_dims(guidance_scale, latents.ndim)
 
         self._guidance_scale = guidance_scale
-        # signal
-
-        target_fps = 25
-
-
-        native_fps = 20
-        sample_fps = fps + 1
-        frame_step = max(1, round(native_fps / sample_fps))
-        frame_range = range(0, 100, frame_step)
-
-        start = 0
-        frame_range_indices = list(frame_range)[start:start + num_frames]
-        # shift  for initial signal,
-        # frame_range_indices = [x + 1 for x in frame_range_indices]
-        # print(signal_values.unsqueeze(0).size())
 
         # encoder_hidden_states = torch.cat((image_embeddings, signal_embeddings), dim=2)
         # encoder_hidden_states = signal_embeddings.to(dtype)

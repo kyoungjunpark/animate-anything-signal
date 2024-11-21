@@ -113,20 +113,6 @@ def load_channel(channels, frame_step, frame_range_indices):
     return partial_channels
 
 
-def load_channel2(channels, max_frame, frame_step, frame_range_indices):
-    # print(frame_range_indices, frame_step, max_frame)
-    # [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120] 5
-    # # 157
-    partial_channels = channels[frame_step+frame_range_indices[0]:frame_step+frame_range_indices[-1] + frame_step, :]
-
-    # partial_channels = F.pad(partial_channels, (0, 0, 0, 78 - partial_channels.size(0)))
-    partial_channels = partial_channels[:(max_frame+1) * frame_step, :]
-
-    partial_channels = torch.cat((channels[:frame_step,:], partial_channels), dim=0)  # Shape: (78, 512, 4)
-
-    return partial_channels
-
-
 class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
     model_cpu_offload_seq = "image_encoder->unet->vae"
     _callback_tensor_inputs = ["latents"]

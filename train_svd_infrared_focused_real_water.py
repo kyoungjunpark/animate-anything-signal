@@ -751,7 +751,7 @@ def main(
         if not os.path.exists("fvd_real_infrared_water.stat"):
             real_videos = []
             for step, batch in enumerate(tqdm(train_dataloader)):
-                if step >= 100:
+                if step >= 500:
                     break
                 pixel_values_real = batch['pixel_values_real']
                 """
