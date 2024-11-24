@@ -259,7 +259,8 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
             sig3=None,
             camera_fourier=None,
             tx_fourier=None,
-            img1=None
+            img1=None,
+            img2=None
     ):
         r"""
         The call function to the pipeline for generation.
@@ -357,9 +358,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         batch_size = 1
 
         image_pool = img1
-        signal_encoder = sig1
-        signal_encoder2 = sig2
-        signal_encoder3 = sig3
+        image_pool2 = img2
 
 
         # assert batch_size == 1
@@ -396,11 +395,14 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         image = video[0:n_input_frames]
         image = self.image_processor.preprocess(image, height=height, width=width)
         # print("image2", image.size())  # image2 torch.Size([5, 3, 64, 64])
-        image_latents = self._encode_vae_image(image, device, num_videos_per_prompt, False) * self.vae_scale_factor
-        image_latents = image_latents.to(dtype)
-        image_latents = rearrange(image_latents, '(b f) c h w-> b f c h w', b=batch_size).to(dtype)
-        image_latents = image_pool(image_latents) / self.vae_scale_factor
-        images_latent = image_latents.repeat(1, num_frames, 1, 1, 1)
+        images_latent = self._encode_vae_image(image, device, num_videos_per_prompt, False) * self.vae_scale_factor
+        images_latent = images_latent.to(dtype)
+        images_latent = rearrange(images_latent, '(b f) c h w-> b f c h w', b=batch_size).to(dtype)
+        images_hidden = image_pool(images_latent) / self.vae_scale_factor
+
+        images_latent = image_pool2(images_latent) / self.vae_scale_factor
+        images_latent = images_latent.repeat(1, num_frames, 1, 1, 1)
+
         # mask = repeat(mask, '1 h w -> 2 f 1 h w', f=num_frames)
         # 5. Get Added Time IDs
         added_time_ids = self._get_add_time_ids(
@@ -442,9 +444,9 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
 
         # encoder_hidden_states = torch.cat((image_embeddings, signal_embeddings), dim=2)
         # encoder_hidden_states = signal_embeddings.to(dtype)
-        image_latent = image_latents.reshape(batch_size, 1, -1)
+        # image_latent = image_latents.reshape(batch_size, 1, -1)
 
-        encoder_hidden_states = image_latent
+        encoder_hidden_states = images_hidden
 
         images_latent = torch.cat([images_latent] * 2) if do_classifier_free_guidance else images_latent
 

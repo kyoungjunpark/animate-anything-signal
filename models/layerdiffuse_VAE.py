@@ -712,13 +712,13 @@ class VideoEncoderHidden(nn.Module):
         )
 
         # Linear layer to produce a latent representation
-        self.fc_latent = nn.Linear(2 * target_h * target_w * 64, latent_dim)
+        self.fc_latent = nn.Linear(2 * target_h * target_w, latent_dim)
 
     def forward(self, x):
         batch_size, frames, channels, width, height = x.shape
 
         x = self.encoder(x)
-        latent = self.fc_latent(x) # torch.Size([2, 512])
+        latent = self.fc_latent(x)  # torch.Size([2, 512])
         latent = latent.view(batch_size, 1, -1)
         return latent
 
@@ -731,7 +731,7 @@ class VideoEncoder(nn.Module):
 
         # Temporal encoding layer - Apply Conv2d across each frame
         self.temporal_conv = nn.Conv2d(
-            in_channels=3,  # Assuming 3 channels per frame
+            in_channels=4,  # Assuming 3 channels per frame
             out_channels=64,
             kernel_size=3,
             stride=2,
@@ -816,16 +816,16 @@ class CompactImageReduction(nn.Module):
 
 
 class CompactImageReduction2(nn.Module):
-    def __init__(self, input_dim=4, target_h=1, target_w=1, n_input_frames=5, frame_step=2, encoder_hidden_states=1024):
+    def __init__(self, input_dim=4, target_h=1, target_w=1, n_input_frames=5, frame_step=2, encoder_hidden_dim=1024):
         super(CompactImageReduction2, self).__init__()
         self.conv = nn.Conv2d(in_channels=input_dim, out_channels=1, kernel_size=1)
-        self.fc2 = nn.Linear(n_input_frames * target_h * target_w, encoder_hidden_states)
+        self.fc2 = nn.Linear(n_input_frames * target_h * target_w, encoder_hidden_dim)
 
         self.target_h = target_h
         self.target_w = target_w
         self.n_input_frames = n_input_frames
         self.silu = nn.SiLU()
-        self.encoder_hidden_states = encoder_hidden_states
+        self.encoder_hidden_dim = encoder_hidden_dim
 
     def forward(self, x):
         batch_size, frames, channels, width, height = x.shape
@@ -839,7 +839,7 @@ class CompactImageReduction2(nn.Module):
         x = x.view(batch_size, -1)
         x = self.fc2(x)
 
-        x = x.view(batch_size, 1, 1, self.encoder_hidden_states)
+        x = x.view(batch_size, 1, 1, self.encoder_hidden_dim)
 
         return x
 

@@ -1,0 +1,27 @@
+frame 1: /Users/parkkyoungjun/Downloads/infrared/fef6bb89-52cd-413c-8ad2-bbd1f5377a6f/7954_7970_4820_0000/seq002/output_video.mp4
+
+Frame 2:/Users/parkkyoungjun/Downloads/infrared/fe94c17a-ba89-49ae-91e1-9173ded16545/136376_136338_136404_136451_136310_136429_130646_0000/seq003/output_video.mp4
+
+Frame 3: /Users/parkkyoungjun/Downloads/infrared/feddc846-b266-435d-b48b-a23a4f201c3f/7384_10045_9994_9978_10029_10010_0000/seq001/output_video.mp4
+
+Frame 4:/Users/parkkyoungjun/Downloads/infrared/ff46cfd8-c02e-40b9-a7dd-f27a3239e8ae/48845_48883_48864_46560_48902_0000/seq004/output_video.mp4
+
+Frame 5: /Users/parkkyoungjun/Downloads/infrared/fecbd225-e2ad-4178-aa27-a5044d867fd0/37317_37255_37412_37377_0000/seq004/output_video.mp4
+
+Frame 6: /Users/parkkyoungjun/Downloads/infrared/ff46cfd8-c02e-40b9-a7dd-f27a3239e8ae/48845_48883_48864_46560_48902_0000/seq003/output_video.mp4
+
+Frame 7: /Users/parkkyoungjun/Downloads/infrared/ff46cfd8-c02e-40b9-a7dd-f27a3239e8ae/48845_48883_48864_46560_48902_0000/seq002/output_video.mp4
+
+Frame 8: /Users/parkkyoungjun/Downloads/infrared/fd2905d1-64c4-4550-a118-3a5a9881c093/24784_24730_21498_24746_24714_24765_0000_24800/seq001/output_video.mp4
+
+Frame 9:/Users/parkkyoungjun/Downloads/infrared/5e31d382-5193-48e6-aab1-99104dff867c/17155_17117_17139_17171_17187_13050_17047_0000/seq001/output_video.mp4
+
+Frame 10: /Users/parkkyoungjun/Downloads/infrared/39fc02d5-33cb-45f6-b769-c168ef4b7d82/4660_4641_4606_4622_4550_0000_1524/seq001/output_video.mp4
+
+
+for file in frame*.mp4; do
+    # Extract the base name without the extension
+    filename="${file%.*}"
+    # Run ffmpeg command to extract the first frame
+    ffmpeg -i "$file" -vf "select=eq(n\,0)" -q:v 3 "${filename}.jpg"
+done
