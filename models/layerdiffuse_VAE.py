@@ -213,6 +213,21 @@ class MultiConv1DLayer(nn.Module):
         return x
 
 
+class MultiConv1DLayer2(nn.Module):
+    def __init__(self, in_channels=11, target_h=1, target_w=1):
+        super(MultiConv1DLayer2, self).__init__()
+        self.fc2 = nn.Linear(target_h * target_w * in_channels, 1 * target_h * target_w)
+
+    def forward(self, x):
+        batch_size, frames, channels, width, height = x.shape
+        x = x.view(batch_size * frames, channels * width * height)  # Reshape back to [2, 25, 1, 64, 64]
+
+        x = self.fc2(x)
+        x = x.view(batch_size, frames, 1, width, height)  # Reshape back to [2, 25, 1, 64, 64]
+
+        return x
+
+
 class CompactSignalTransformer2(nn.Module):
     def __init__(self, input_size=512, target_h=1, target_w=1, frame_step=3, n_input_frames=5, output_dim=4):
         super(CompactSignalTransformer2, self).__init__()
@@ -757,7 +772,7 @@ class VideoEncoder(nn.Module):
         # Reduce channels to the desired output shape
         self.final_conv = nn.Conv2d(
             in_channels=256,
-            out_channels=1,
+            out_channels=self.output_dim,
             kernel_size=1  # Use 1x1 to reduce channels
         )
 
@@ -783,7 +798,6 @@ class VideoEncoder(nn.Module):
         x = self.final_conv(x.mean(dim=1))  # Mean over frames, then reduce channels
         x = self.pool(x)
         x = x.unsqueeze(1)
-        # print("xxxxxxxx", x.size())
         return x
 
 

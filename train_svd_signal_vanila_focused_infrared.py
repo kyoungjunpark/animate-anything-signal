@@ -415,6 +415,7 @@ def save_pipe(
         camera_fourier,
         tx_fourier,
         img1,
+        img2,
         output_dir,
         is_checkpoint=False,
         save_pretrained_model=True
@@ -434,6 +435,7 @@ def save_pipe(
     sig3_out = copy.deepcopy(sig3)
 
     img1_out = copy.deepcopy(img1)
+    img2_out = copy.deepcopy(img2)
 
     camera_fourier_out = copy.deepcopy(camera_fourier)
     tx_fourier_out = copy.deepcopy(tx_fourier)
@@ -446,6 +448,7 @@ def save_pipe(
         torch.save(sig2_out.state_dict(), signal_save_path + 'sig2.pth')
         torch.save(sig3_out.state_dict(), signal_save_path + 'sig3.pth')
         torch.save(img1_out.state_dict(), signal_save_path + 'img1.pth')
+        torch.save(img2_out.state_dict(), signal_save_path + 'img2.pth')
 
         torch.save(camera_fourier_out.state_dict(), signal_save_path + 'camera_fourier.pth')
         torch.save(tx_fourier_out.state_dict(), signal_save_path + 'tx_fourier.pth')
@@ -454,7 +457,7 @@ def save_pipe(
 
     del pipeline
     del unet_out
-    del sig1_out, sig2_out, sig3_out, img1_out,
+    del sig1_out, sig2_out, sig3_out, img1_out, img2_out
     torch.cuda.empty_cache()
     gc.collect()
 
@@ -477,7 +480,7 @@ def prompt_image(image, processor, encoder):
 
 
 def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
-                  rescale_schedule, offset_noise_strength, unet, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, n_input_frames, motion_mask,
+                  rescale_schedule, offset_noise_strength, unet, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, img2, n_input_frames, motion_mask,
                   P_mean=0.7, P_std=1.6):
     pipeline.vae.eval()
     pipeline.image_encoder.eval()
@@ -533,7 +536,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     assert "frame_step" in batch.keys(), batch.keys()
     frame_step = batch["frame_step"][0].item()
     # print("frame_step", frame_step)
-
+    images_hidden = images_hidden.reshape(bsz, 1, -1)
     encoder_hidden_states = images_hidden
     uncond_hidden_states = torch.zeros_like(encoder_hidden_states)
 
@@ -567,6 +570,9 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     accelerator.wait_for_everyone()
     # print(input_latents.size(), c_noise.size(), encoder_hidden_states.size(), added_time_ids.size())
     # torch.Size([2, 25, 9, 1, 1]) torch.Size([2]) torch.Size([50, 1, 1024]) torch.Size([2, 3])
+    # print(encoder_hidden_states.size(), latent_model_input.size())
+    # torch.Size([50, 1, 1, 1024]) torch.Size([2, 25, 8, 64, 64])
+    # torch.Size([50, 1, 1, 1024])torch.Size([50, 1, 1, 1024])torch.Size([50, 1, 1, 1024]) torch.Size([2, 25, 8, 64, 64]) torch.Size([2, 25, 8, 64, 64])
     model_pred = unet(latent_model_input, c_noise, encoder_hidden_states=encoder_hidden_states, added_time_ids=added_time_ids).sample
     predict_x0 = c_out * model_pred + c_skip * noisy_latents
     loss += ((predict_x0 - latents) ** 2 * loss_weight).mean()
@@ -644,7 +650,7 @@ def main(
 
     # Load scheduler, tokenizer and models. The text encoder is actually image encoder for SVD
     pipeline, tokenizer, feature_extractor, train_scheduler, vae_processor, text_encoder, vae, unet, sig1, sig2, \
-    sig3, camera_fourier, tx_fourier, img1 = load_primary_models(
+    sig3, camera_fourier, tx_fourier, img1, img2 = load_primary_models(
         pretrained_model_path, train_data.n_sample_frames, train_data.frame_step, train_data.n_input_frames, train_data.width, train_data.height)
     # Freeze any necessary models
     freeze_models([vae, unet])
@@ -727,10 +733,10 @@ def main(
         # DataLoaders creation:
 
     # Define the split sizes
+    print("The number of training dataset: ", len(train_dataset))
     n = 50
     interval = len(train_dataset) // n
     test_dataset = [train_dataset[i] for i in range(0, len(train_dataset), interval)][:n]
-
 
     # Split the dataset
     test_dataloader = torch.utils.data.DataLoader(
@@ -747,7 +753,7 @@ def main(
     if accelerator.is_main_process:
         from utils.cdfvd import fvd
         evaluator = fvd.cdfvd('videomae', ckpt_path='vit_g_hybrid_pt_1200e_ssv2_ft', n_fake='full')
-        if not os.path.exists("fvd_real_infrared.stat"):
+        if not os.path.exists("fvd_sim_infrared.stat"):
             real_videos = []
             for step, batch in enumerate(tqdm(train_dataloader)):
                 if step >= 500:
@@ -778,11 +784,11 @@ def main(
             real_videos = torch.stack(real_videos)
             real_videos = rearrange(real_videos, "b1 b2 f c h w -> (b1 b2) f c h w")
             evaluator.compute_real_stats(evaluator.load_videos(".pt", data_type="video_torch", video_data=real_videos))
-            evaluator.save_real_stats("fvd_real_infrared.stat")
+            evaluator.save_real_stats("fvd_sim_infrared.stat")
             # # Shape: (1, T, C, H, W)
             del real_videos
         else:
-            evaluator.load_real_stats("fvd_real_infrared.stat")
+            evaluator.load_real_stats("fvd_sim_infrared.stat")
 
     # Prepare everything with our `accelerator`.
     unet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
@@ -811,7 +817,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("infrared_vanila_sim")
+        accelerator.init_trackers("infrared_vanila_sim_2+2optics")
         wandb.login(key="a94ace7392048e560ce6962a468101c6f0158b55")
         wandb.require("core")
 
@@ -921,9 +927,9 @@ def main(
                         save_filename = f"{global_step}_dataset-{curr_dataset_name}"
                         out_file = f"{output_dir}/samples/"
 
-                        eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, img2, alidation_data, out_file, global_step)
+                        eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, img2, validation_data, out_file, global_step)
                         logger.info(f"Saved a new sample to {out_file}")
-                        if global_step > 2000:
+                        if global_step <= 5 or global_step > 4000:
                             fvd = eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor,
                                                         sig1, sig2,
                                                         sig3, camera_fourier, tx_fourier, img1, img2, None,
@@ -1276,7 +1282,7 @@ def eval_optical_flow(real_videos, fake_videos):
     return np.median(total_distance1)
 
 
-def process_video_tensor(input_tensor, num_frames=8, similarity_threshold=0.99, block_size=16, top_ratio=0.01):
+def process_video_tensor(input_tensor, num_frames=8, similarity_threshold=0.99, block_size=16, top_ratio=0):
     """
     Process the input tensor of shape (1, 8, 3, 360, 640), where:
     - 1: batch size (can be adjusted)
@@ -1343,7 +1349,7 @@ def process_video_tensor(input_tensor, num_frames=8, similarity_threshold=0.99, 
     # Sort blocks by score (highest motion score first)
     motion_block_scores.sort(key=lambda x: x[1], reverse=True)
     # Select the top 10% most dynamic blocks
-    num_top_blocks = max(1, int(len(motion_block_scores) * top_ratio))
+    num_top_blocks = max(2, int(len(motion_block_scores) * top_ratio))
     top_blocks = set([motion_block_scores[i][0] for i in range(num_top_blocks)])
     # Create the mask to black out dynamic parts in each frame (based on blocks)
     masked_frames = []

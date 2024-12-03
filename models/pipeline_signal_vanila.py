@@ -403,6 +403,7 @@ class MaskStableVideoDiffusionPipeline(StableVideoDiffusionPipeline):
         images_latent = image_pool2(images_latent) / self.vae_scale_factor
         images_latent = images_latent.repeat(1, num_frames, 1, 1, 1)
 
+        images_hidden = images_hidden.reshape(batch_size, 1, -1)
         # mask = repeat(mask, '1 h w -> 2 f 1 h w', f=num_frames)
         # 5. Get Added Time IDs
         added_time_ids = self._get_add_time_ids(

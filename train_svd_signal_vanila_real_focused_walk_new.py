@@ -51,7 +51,7 @@ from diffusers.pipelines.stable_video_diffusion.pipeline_stable_video_diffusion 
 from models.layerdiffuse_VAE import LatentSignalEncoder, SignalEncoder, SignalEncoder2, ImageReduction, \
     MultiSignalEncoder, TransformNet, FrameToSignalNet, SignalTransformer, CompactSignalEncoder2, \
     CompactSignalTransformer, CompactImageReduction, CompactSignalEncoder3, FFTConv1DLinearModel, \
-    CompactSignalTransformer2, MultiConv1DLayer, VideoEncoder, VideoEncoderHidden, CompactImageReduction2
+    CompactSignalTransformer2, CompactSignalEncoder3_2, CompactImageReduction2
 # from models.pipeline_stable_video_diffusion import StableVideoDiffusionPipeline
 from utils.dataset import get_train_dataset, extend_datasets, normalize_input
 from einops import rearrange, repeat
@@ -62,7 +62,7 @@ from fastdtw import fastdtw
 from scipy.spatial.distance import euclidean
 from utils.pips.demo import run_model
 from utils.pips.nets.pips import Pips
-from models.pipeline_infrared_real3 import MaskStableVideoDiffusionPipeline
+from models.pipeline_signal_vanila import MaskStableVideoDiffusionPipeline
 
 decord.bridge.set_bridge('torch')
 
@@ -104,14 +104,10 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
     # 25 = 4(latent/noisy) + 1(signal) // + n_input_frames(5) // 1(initial signal)
     # prev in_channels: cond(4) + noise(4) (+ mask(1))
     # ++ init_images(1) + init_signals(1) + signal(1) + pos(1)
-    in_channels = 9
+    in_channels = 8
     if eval:
-        pipeline = UNetSpatioTemporalConditionModel.from_pretrained(pretrained_model_path + "/unet",
-                                                                in_channels=in_channels,
-                                                                low_cpu_mem_usage=False, device_map=None,
-                                                                ignore_mismatched_sizes=True)
-
-        # MaskStableVideoDiffusionPipeline.from_pretrained(pretrained_model_path, torch_dtype=torch.float16, variant='fp16')
+        pipeline = MaskStableVideoDiffusionPipeline.from_pretrained(pretrained_model_path, torch_dtype=torch.float16,
+                                                                    variant='fp16')
     else:
         pipeline = MaskStableVideoDiffusionPipeline.from_pretrained(pretrained_model_path)
 
@@ -131,23 +127,45 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
 
         print(f"#########Unet channel is changed from {prev_channel} to {pipeline.unet.config.in_channels} ########")
         del unet2
-    CHIRP_LEN = 512 * 4  # 512 is channel, 4 is number of receivers
-    encoder_hidden_dim = 512
+    prev_channel = pipeline.unet.config.in_channels
+    # first time init, modify unet conv in
+    unet2 = pipeline.unet
+    unet = UNetSpatioTemporalConditionModel.from_pretrained(pretrained_model_path + "/unet",
+                                                            in_channels=in_channels,
+                                                            low_cpu_mem_usage=False, device_map=None,
+                                                            ignore_mismatched_sizes=True)
+    unet.conv_in.bias.data = copy.deepcopy(unet2.conv_in.bias)
+    torch.nn.init.zeros_(unet.conv_in.weight)
+    load_in_channel = unet2.conv_in.weight.data.shape[1]
+    unet.conv_in.weight.data[:, in_channels - load_in_channel:] = copy.deepcopy(unet2.conv_in.weight.data)
+    pipeline.unet = unet
 
+    print(f"#########Unet channel is changed from {prev_channel} to {pipeline.unet.config.in_channels} ########")
+    del unet2
+    CHIRP_LEN = 512
+    encoder_hidden_dim = 1024
+
+    # signal_encoder = LatentSignalEncoder(output_dim=encoder_hidden_dim)
+    # signal_encoder = SignalEncoder(input_size=CHIRP_LEN, frame_step=2, output_size=encoder_hidden_dim)
     image_encoder = CompactImageReduction2(input_dim=4, frame_step=frame_step, n_input_frames=n_input_frames,
                                            target_h=width // 8, target_w=height // 8, encoder_hidden_dim=encoder_hidden_dim)
 
     image_encoder2 = CompactImageReduction(input_dim=4, frame_step=frame_step, n_input_frames=n_input_frames, target_h=width // 8, target_w=height // 8)
 
+    # for intiial signal
+    # n_input_frames += 1
     fps += 1
-    signal_encoder = CompactSignalTransformer2(input_size=CHIRP_LEN, frame_step=frame_step, n_input_frames=n_input_frames+1, target_h=16, target_w=64 // 2, output_dim=1)
+    # signal_encoder = FrameToSignalNet(input_size=CHIRP_LEN, n_input_frames=n_input_frames, frame_step=frame_step, output_size=encoder_hidden_dim)
+    signal_encoder = CompactSignalTransformer2(input_size=CHIRP_LEN, output_dim=1, frame_step=frame_step, n_input_frames=n_input_frames, target_h=16, target_w=64)
+
 
     # Just large dim for later interpolation
     input_latents_dim1 = 100
     input_latents_dim2 = 100
 
-    signal_encoder2 = CompactSignalEncoder3(signal_data_dim=CHIRP_LEN, fps=fps, frame_step=frame_step, target_h=width // 8, target_w=height // 8)
-    signal_encoder3 = CompactSignalTransformer2(input_size=CHIRP_LEN, frame_step=frame_step, n_input_frames=n_input_frames+1, target_h=width // 8, target_w=height // 8)
+    # signal_encoder2 = LatentSignalEncoder(output_dim=input_latents_dim1 * input_latents_dim2)
+    signal_encoder2 = CompactSignalEncoder3_2(signal_data_dim=CHIRP_LEN, output_dim=1, fps=fps, frame_step=frame_step, target_h=width // 8, target_w=height // 8)
+    signal_encoder3 = CompactSignalTransformer2(input_size=CHIRP_LEN, output_dim=1, frame_step=frame_step, n_input_frames=n_input_frames, target_h=width // 8, target_w=height // 8)
 
     # Embed specific AP's location as bounding box
     # x_min, y_min, z_min, x_max, y_max, z_max
@@ -155,19 +173,12 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
     # 3 x 8 x 2 = 48
     # 4 x 8 x 2 = 64
     fourier_freqs = 8
-    camera_fourier_embedder = FourierEmbedder(num_freqs=fourier_freqs, output_dim=4*4*fourier_freqs*2, temperature=2, target_h=width // 8, target_w=height // 8)
-    tx_fourier_embedder = FourierEmbedder(num_freqs=fourier_freqs, output_dim=3*fourier_freqs*2, temperature=2, target_h=width // 8, target_w=height // 8)
-
-    video_encoder = VideoEncoder(target_h=width // 8, target_w=height // 8)
-    video_encoder_hidden = VideoEncoderHidden(target_h=width // 8, target_w=height // 8
-                                              , n_input_frames=n_input_frames, latent_dim=encoder_hidden_dim)
-
-    final_encoder = MultiConv1DLayer(in_channels=2)
+    camera_fourier_embedder = FourierEmbedder(num_freqs=fourier_freqs, output_dim=4*4*fourier_freqs*2, temperature=2, target_h=width // 16, target_w=height // 16)
+    tx_fourier_embedder = FourierEmbedder(num_freqs=fourier_freqs, output_dim=3*fourier_freqs*2, temperature=2, target_h=width // 16, target_w=height // 16)
 
     return pipeline, None, pipeline.feature_extractor, pipeline.scheduler, pipeline.image_processor, \
-           pipeline.image_encoder, pipeline.vae, pipeline.unet, signal_encoder, signal_encoder2, signal_encoder3, \
-           video_encoder, video_encoder_hidden, \
-           camera_fourier_embedder, tx_fourier_embedder, image_encoder, image_encoder2, final_encoder
+           pipeline.image_encoder, pipeline.vae, pipeline.unet, signal_encoder, signal_encoder2, signal_encoder3,\
+           camera_fourier_embedder, tx_fourier_embedder, image_encoder, image_encoder2
 
 
 def convert_svd(pretrained_model_path, out_path):
@@ -387,7 +398,7 @@ def enforce_zero_terminal_snr(betas):
 
 
 def should_sample(global_step, validation_steps, validation_data):
-    return (global_step % validation_steps == 0 or global_step == 10) \
+    return (global_step % validation_steps == 0 or global_step == 5) \
            and validation_data.sample_preview
 
 
@@ -401,13 +412,10 @@ def save_pipe(
         sig1,
         sig2,
         sig3,
-        video_encoder,
-        video_encoder_hidden,
         camera_fourier,
         tx_fourier,
         img1,
         img2,
-        final_encoder,
         output_dir,
         is_checkpoint=False,
         save_pretrained_model=True
@@ -429,12 +437,8 @@ def save_pipe(
     img1_out = copy.deepcopy(img1)
     img2_out = copy.deepcopy(img2)
 
-    video_encoder_out = copy.deepcopy(video_encoder)
-    video_encoder_hidden_out = copy.deepcopy(video_encoder_hidden)
-
     camera_fourier_out = copy.deepcopy(camera_fourier)
     tx_fourier_out = copy.deepcopy(tx_fourier)
-    final_encoder_out = copy.deepcopy(final_encoder)
 
     if save_pretrained_model:
         pipeline.save_pretrained(save_path)
@@ -446,18 +450,14 @@ def save_pipe(
         torch.save(img1_out.state_dict(), signal_save_path + 'img1.pth')
         torch.save(img2_out.state_dict(), signal_save_path + 'img2.pth')
 
-        torch.save(video_encoder_out.state_dict(), signal_save_path + 'video_encoder.pth')
-        torch.save(video_encoder_hidden_out.state_dict(), signal_save_path + 'video_encoder_hidden.pth')
-
         torch.save(camera_fourier_out.state_dict(), signal_save_path + 'camera_fourier.pth')
         torch.save(tx_fourier_out.state_dict(), signal_save_path + 'tx_fourier.pth')
-        torch.save(final_encoder_out.state_dict(), signal_save_path + 'final_encoder.pth')
 
     logger.info(f"Saved model at {save_path} on step {global_step}")
 
     del pipeline
     del unet_out
-    del sig1_out, sig2_out, sig3_out, video_encoder_out, video_encoder_hidden_out, img1_out, img2_out, camera_fourier_out, tx_fourier_out, final_encoder_out
+    del sig1_out, sig2_out, sig3_out, img1_out, img2_out
     torch.cuda.empty_cache()
     gc.collect()
 
@@ -480,8 +480,7 @@ def prompt_image(image, processor, encoder):
 
 
 def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
-                  rescale_schedule, offset_noise_strength, unet, sig1, sig2, sig3, video_encoder, video_encoder_hidden,
-                  camera_fourier, tx_fourier, img1, img2, final_encoder, n_input_frames, motion_mask,
+                  rescale_schedule, offset_noise_strength, unet, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, img2, n_input_frames, motion_mask,
                   P_mean=0.7, P_std=1.6):
     pipeline.vae.eval()
     pipeline.image_encoder.eval()
@@ -494,10 +493,8 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     bsz, num_frames = pixel_values.shape[:2]
 
     frames = rearrange(pixel_values, 'b f c h w-> (b f) c h w').to(dtype)
-    latents = vae.encode(frames).latent_dist.mode()
+    latents = vae.encode(frames).latent_dist.mode() * vae.config.scaling_factor
     latents = rearrange(latents, '(b f) c h w-> b f c h w', b=bsz)  # 1 Channel
-
-    final_encoder = final_encoder.to(latents.device).to(dtype)
 
     image_pool = img1.to(latents.device).to(dtype)
     image_pool2 = img2.to(latents.device).to(dtype)
@@ -518,7 +515,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     images_latent = rearrange(images_latent, '(b f) c h w-> b f c h w', b=bsz).to(dtype)
     images_hidden = image_pool(images_latent) / vae.config.scaling_factor
 
-    images_latent = image_pool2(images_latent)
+    images_latent = image_pool2(images_latent) / vae.config.scaling_factor
     images_latent = images_latent.repeat(1, num_frames, 1, 1, 1)
 
     pipeline.image_encoder.to(device, dtype=dtype)
@@ -533,52 +530,35 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     loss_weight = (sigma ** 2 + 1) / sigma ** 2
 
     noisy_latents = latents + torch.randn_like(latents) * sigma
-    input_latents = torch.cat([c_in * noisy_latents, condition_latent], dim=2)
+    input_latents = torch.cat([c_in * noisy_latents, condition_latent / vae.config.scaling_factor], dim=2)
 
+    # Signal embedding
     assert "frame_step" in batch.keys(), batch.keys()
-
-    # infrared
-    video_encoder_hidden = video_encoder_hidden.to(latents.device).to(dtype)
-    video_encoder = video_encoder.to(latents.device).to(dtype)
-
-    infrared_pixel_values = batch['infrared_pixel_values']
-    infrared_images = infrared_pixel_values[:, 0:n_input_frames].to(dtype)  # b f c h w
-    # infrared_image = rearrange(image, 'b f c  h w-> (b f) c h w').to(dtype)
-    infrared_images = rearrange(infrared_images, 'b f c h w-> (b f) c h w').to(dtype)
-
-    infrared_images = vae.encode(infrared_images).latent_dist.mode()
-    infrared_images = rearrange(infrared_images, '(b f) c h w-> b f c h w', b=bsz).to(dtype)
-
-    infrared_hidden_embeddings = video_encoder_hidden(infrared_images)
-    infrared_embeddings = video_encoder(infrared_images)
-    infrared_embeddings = infrared_embeddings.repeat(1, num_frames, 1, 1, 1)
-
-    # encoder_hidden_states = infrared_hidden_embeddings
+    frame_step = batch["frame_step"][0].item()
+    # print("frame_step", frame_step)
     images_hidden = images_hidden.reshape(bsz, 1, -1)
-
-    # encoder_hidden_states = image_latent
-    encoder_hidden_states = torch.cat((images_hidden, infrared_hidden_embeddings), dim=2)
-
-    encoder_hidden_states = encoder_hidden_states.repeat_interleave(repeats=num_frames, dim=0)
-
+    encoder_hidden_states = images_hidden
     uncond_hidden_states = torch.zeros_like(encoder_hidden_states)
 
     if random.random() < 0.15:
         encoder_hidden_states = uncond_hidden_states
 
+    encoder_hidden_states = encoder_hidden_states.repeat_interleave(repeats=num_frames, dim=0)
+
+    # Add noise to the latents according to the noise magnitude at each timestep
+    # (this is the forward diffusion process) #[bsz, f, c, h , w]
+
     motion_bucket_id = 127
     fps = 6
     added_time_ids = pipeline._get_add_time_ids(fps, motion_bucket_id,
-                                                noise_aug_strength, infrared_embeddings.dtype, bsz, 1, False)
+                                                noise_aug_strength, dtype, bsz, 1, False)
     added_time_ids = added_time_ids.to(device)
 
     loss = 0
-    final_input = torch.cat([images_latent, infrared_embeddings], dim=2)
-    final_input = final_encoder(final_input)
     # print(signal_initial_latent.size(), signal_latent.size(), images_latent.size(), input_latents.size())
     # torch.Size([2, 25, 1, 64, 64]) torch.Size([2, 25, 1, 64, 64]) torch.Size([2, 25, 5, 64, 64]) torch.Size([2, 25, 8, 64, 64])
-    latent_model_input = torch.cat([final_input, input_latents], dim=2)
-
+    # latent_model_input = torch.cat([input_latents], dim=2)
+    latent_model_input = input_latents
     accelerator.wait_for_everyone()
     # print(input_latents.size(), c_noise.size(), encoder_hidden_states.size(), added_time_ids.size())
     # torch.Size([2, 25, 9, 1, 1]) torch.Size([2]) torch.Size([50, 1, 1024]) torch.Size([2, 3])
@@ -659,7 +639,7 @@ def main(
 
     # Load scheduler, tokenizer and models. The text encoder is actually image encoder for SVD
     pipeline, tokenizer, feature_extractor, train_scheduler, vae_processor, text_encoder, vae, unet, sig1, sig2, \
-    sig3, video_encoder, video_encoder_hidden, camera_fourier, tx_fourier, img1, img2, final_encoder = load_primary_models(
+    sig3, camera_fourier, tx_fourier, img1, img2 = load_primary_models(
         pretrained_model_path, train_data.n_sample_frames, train_data.frame_step, train_data.n_input_frames, train_data.width, train_data.height)
     # Freeze any necessary models
     freeze_models([vae, unet])
@@ -742,7 +722,7 @@ def main(
         # DataLoaders creation:
 
     # Define the split sizes
-    n = 50
+    n = 10
     interval = len(train_dataset) // n
     test_dataset = [train_dataset[i] for i in range(0, len(train_dataset), interval)][:n]
 
@@ -761,7 +741,7 @@ def main(
     if accelerator.is_main_process:
         from utils.cdfvd import fvd
         evaluator = fvd.cdfvd('videomae', ckpt_path='vit_g_hybrid_pt_1200e_ssv2_ft', n_fake='full')
-        if not os.path.exists("fvd_real_infrared_water.stat"):
+        if not os.path.exists("fvd_real_infrared_new_walk.stat"):
             real_videos = []
             for step, batch in enumerate(tqdm(train_dataloader)):
                 if step >= 500:
@@ -792,11 +772,11 @@ def main(
             real_videos = torch.stack(real_videos)
             real_videos = rearrange(real_videos, "b1 b2 f c h w -> (b1 b2) f c h w")
             evaluator.compute_real_stats(evaluator.load_videos(".pt", data_type="video_torch", video_data=real_videos))
-            evaluator.save_real_stats("fvd_real_infrared_water.stat")
+            evaluator.save_real_stats("fvd_real_infrared_new_walk.stat")
             # # Shape: (1, T, C, H, W)
             del real_videos
         else:
-            evaluator.load_real_stats("fvd_real_infrared_water.stat")
+            evaluator.load_real_stats("fvd_real_infrared_new_walk.stat")
 
     # Prepare everything with our `accelerator`.
     unet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
@@ -819,13 +799,13 @@ def main(
     weight_dtype = is_mixed_precision(accelerator)
 
     # Move text encoders, and VAE to GPU
-    models_to_cast = [text_encoder, vae, sig1, sig2, sig3, video_encoder, video_encoder_hidden, camera_fourier, tx_fourier, img1, img2, final_encoder]
+    models_to_cast = [text_encoder, vae, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, img2]
     cast_to_gpu_and_type(models_to_cast, accelerator.device, weight_dtype)
 
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("infrared_real_water3")
+        accelerator.init_trackers("vanila_real_new_walk_mean_005")
         wandb.login(key="a94ace7392048e560ce6962a468101c6f0158b55")
         wandb.require("core")
 
@@ -881,15 +861,12 @@ def main(
                 continue
 
             with accelerator.accumulate(unet), accelerator.accumulate(sig1), accelerator.accumulate(
-                    sig2), accelerator.accumulate(sig3), accelerator.accumulate(video_encoder), \
-                    accelerator.accumulate(video_encoder_hidden), accelerator.accumulate(camera_fourier), \
-                    accelerator.accumulate(tx_fourier), accelerator.accumulate(img1), accelerator.accumulate(img2), \
-                    accelerator.accumulate(final_encoder):
+                    sig2), accelerator.accumulate(sig3), accelerator.accumulate(camera_fourier), \
+                    accelerator.accumulate(tx_fourier), accelerator.accumulate(img1), accelerator.accumulate(img2):
                 with accelerator.autocast():
                     loss = finetune_unet(accelerator, pipeline, batch, use_offset_noise,
-                                         rescale_schedule, offset_noise_strength, unet, sig1, sig2, sig3, video_encoder,
-                                         video_encoder_hidden, camera_fourier,
-                                         tx_fourier, img1, img2, final_encoder,
+                                         rescale_schedule, offset_noise_strength, unet, sig1, sig2, sig3, camera_fourier,
+                                         tx_fourier, img1, img2,
                                          train_data.n_input_frames, motion_mask)
                 device = loss.device
                 # Gather the losses across all processes for logging (if we use distributed training).
@@ -923,13 +900,10 @@ def main(
                         accelerator.unwrap_model(sig1),
                         accelerator.unwrap_model(sig2),
                         accelerator.unwrap_model(sig3),
-                        accelerator.unwrap_model(video_encoder),
-                        accelerator.unwrap_model(video_encoder_hidden),
                         accelerator.unwrap_model(camera_fourier),
                         accelerator.unwrap_model(tx_fourier),
                         accelerator.unwrap_model(img1),
                         accelerator.unwrap_model(img2),
-                        accelerator.unwrap_model(final_encoder),
                         output_dir,
                         is_checkpoint=True,
                         save_pretrained_model=save_pretrained_model
@@ -941,14 +915,14 @@ def main(
                         curr_dataset_name = batch['dataset'][0]
                         save_filename = f"{global_step}_dataset-{curr_dataset_name}"
                         out_file = f"{output_dir}/samples/"
-                        fvd = eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor,
-                                                    sig1, sig2, sig3, video_encoder, video_encoder_hidden,
-                                                    camera_fourier, tx_fourier, img1, img2, final_encoder,
-                                                    validation_data, out_file, global_step)
 
-                        eval(pipeline, vae_processor, sig1, sig2, sig3, video_encoder, video_encoder_hidden,
-                             camera_fourier, tx_fourier, img1, img2, final_encoder, validation_data, out_file, global_step)
+                        eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, img2, validation_data, out_file, global_step)
                         logger.info(f"Saved a new sample to {out_file}")
+                        if global_step > 8000:
+                            fvd = eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor,
+                                                        sig1, sig2,
+                                                        sig3, camera_fourier, tx_fourier, img1, img2, None,
+                                                        validation_data, out_file, global_step)
 
             logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
             accelerator.log({"training_loss": loss.detach().item()}, step=step)
@@ -970,13 +944,10 @@ def main(
             accelerator.unwrap_model(sig1),
             accelerator.unwrap_model(sig2),
             accelerator.unwrap_model(sig3),
-            accelerator.unwrap_model(video_encoder),
-            accelerator.unwrap_model(video_encoder_hidden),
             accelerator.unwrap_model(camera_fourier),
             accelerator.unwrap_model(tx_fourier),
             accelerator.unwrap_model(img1),
             accelerator.unwrap_model(img2),
-            accelerator.unwrap_model(final_encoder),
             output_dir,
             is_checkpoint=False,
             save_pretrained_model=save_pretrained_model
@@ -984,7 +955,7 @@ def main(
     accelerator.end_training()
 
 
-def eval(pipeline, vae_processor, sig1, sig2, sig3, video_encoder, video_encoder_hidden, camera_fourier, tx_fourier, img1, img2, final_encoder, validation_data, out_file, index, forward_t=25, preview=True):
+def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, img2, validation_data, out_file, index, forward_t=25, preview=True):
     vae = pipeline.vae
     device = vae.device
     dtype = vae.dtype
@@ -1014,7 +985,6 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, video_encoder, video_encoder
     for image in sorted(validation_data.prompt_image):
         # print(out_file)
         # print(image)
-        infrared = image.replace("rgb", "inf")
 
         image_replaced = image.replace("frame", str(index) + "_frame").replace('.mp4', '.gif')
         target_file = out_file + image_replaced
@@ -1042,27 +1012,6 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, video_encoder, video_encoder
         # video = transform(video)
         # video = normalize_input(video)
 
-        # infrared
-        vr = decord.VideoReader(infrared)
-        frame_step = validation_data.frame_step
-        frame_range = list(range(0, len(vr), frame_step))
-        frames = vr.get_batch(frame_range[0:validation_data.num_frames])
-
-        if isinstance(frames, torch.Tensor):
-            frames = frames.cpu().numpy()  # Convert to a NumPy array if it's a tensor
-
-        # Convert each frame to a PIL.Image
-        pil_infrared_images = []
-        for i in range(frames.shape[0]):  # Iterate over the batch
-            frame = frames[i]  # Get the i-th frame, shape (height, width, 3)
-            # pil_image = torch.tensor(frame)  # Convert to PIL.Image
-            pil_image = Image.fromarray(frame)
-            # pil_image = rearrange(pil_image, 'h w c-> c h w').to(dtype)
-            pil_infrared_images.append(pil_image)
-        # pil_infrared_images = torch.stack(pil_infrared_images)
-        # pil_infrared_images = pil_infrared_images.unsqueeze(0)
-
-
         with torch.no_grad():
             if motion_mask:
                 # h, w = validation_data.height // pipeline.vae_scale_factor, validation_data.width // pipeline.vae_scale_factor
@@ -1078,25 +1027,19 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, video_encoder, video_encoder
                     num_inference_steps=validation_data.num_inference_steps,
                     decode_chunk_size=validation_data.decode_chunk_size,
                     fps=validation_data.fps,
-                    frame_step=validation_data.frame_step,
                     motion_bucket_id=validation_data.motion_bucket_id,
                     n_input_frames=validation_data.n_input_frames,
                     signal_latent=None,
                     signal=None,
-                    infrared_video=pil_infrared_images,
                     camera_pose=None,
                     tx_pos=None,
                     sig1=sig1,
                     sig2=sig2,
                     sig3=sig3,
-                    video_encoder=video_encoder,
-                    video_encoder_hidden=video_encoder_hidden,
                     camera_fourier=camera_fourier,
                     tx_fourier=tx_fourier,
-                    final_encoder=final_encoder,
                     img1=img1,
                     img2=img2,
-
                 ).frames[0]
             else:
                 video_frames = pipeline(
@@ -1122,8 +1065,7 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, video_encoder, video_encoder
     return 0
 
 
-def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, sig1, sig2, sig3, video_encoder,
-                          video_encoder_hidden, camera_fourier, tx_fourier, img1, img2, final_encoder, validation_data, out_file, index, forward_t=25, preview=True):
+def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, img2, final_encoder, validation_data, out_file, index, forward_t=25, preview=True):
     vae = pipeline.vae
     device = vae.device
     dtype = vae.dtype
@@ -1149,9 +1091,8 @@ def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, s
     videos1 = []
     videos2 = []
     for step, batch in enumerate(tqdm(test_dataloader)):
+        pixel_values = batch['pixel_values'].to(dtype)
         image_path = batch['pixel_values_path']
-        infrared_image_path = batch['infrared_pixel_values_path']
-
         # image
         vr = decord.VideoReader(image_path[0])
         frame_step = validation_data.frame_step
@@ -1168,23 +1109,10 @@ def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, s
             pil_image = Image.fromarray(frame)  # Convert to PIL.Image
             pil_images.append(pil_image)
 
-        # infrared
-        vr = decord.VideoReader(infrared_image_path[0])
-        frame_step = validation_data.frame_step
-        frame_range = list(range(0, len(vr), frame_step))
-        frames = vr.get_batch(frame_range[0:validation_data.num_frames])
+        # camera_data = np.load(camera_pose)
+        # tx_data = np.loadtxt(tx_loc)
 
-        if isinstance(frames, torch.Tensor):
-            frames = frames.cpu().numpy()  # Convert to a NumPy array if it's a tensor
-
-        # Convert each frame to a PIL.Image
-        pil_infrared_images = []
-        for i in range(frames.shape[0]):  # Iterate over the batch
-            frame = frames[i]  # Get the i-th frame, shape (height, width, 3)
-            # pil_image = torch.tensor(frame)  # Convert to PIL.Image
-            pil_image = Image.fromarray(frame)
-            # pil_image = rearrange(pil_image, 'h w c-> c h w').to(dtype)
-            pil_infrared_images.append(pil_image)
+        camera_data = batch['camera_pose'].float().half().to(device).squeeze(0)
 
         with torch.no_grad():
             # h, w = validation_data.height // pipeline.vae_scale_factor, validation_data.width // pipeline.vae_scale_factor
@@ -1200,25 +1128,19 @@ def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, s
                 num_inference_steps=validation_data.num_inference_steps,
                 decode_chunk_size=validation_data.decode_chunk_size,
                 fps=validation_data.fps,
-                frame_step=validation_data.frame_step,
                 motion_bucket_id=validation_data.motion_bucket_id,
                 n_input_frames=validation_data.n_input_frames,
                 signal_latent=None,
                 signal=None,
-                infrared_video=pil_infrared_images,
-                camera_pose=None,
+                camera_pose=camera_data,
                 tx_pos=None,
                 sig1=sig1,
                 sig2=sig2,
                 sig3=sig3,
-                video_encoder=video_encoder,
-                video_encoder_hidden=video_encoder_hidden,
                 camera_fourier=camera_fourier,
                 tx_fourier=tx_fourier,
-                final_encoder=final_encoder,
                 img1=img1,
                 img2=img2,
-
             ).frames[0]
 
         transform = transforms.ToTensor()
@@ -1263,11 +1185,10 @@ def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, s
 
         videos1.append(pil_images)
         videos2.append(video_frames)
-    # video_frames torch.Size([25, 3, 512, 512])
-    # pil_images torch.Size([25, 3, 480, 640]) -> resized to 512, 512
+
     videos1 = torch.stack(videos1)
     videos2 = torch.stack(videos2)
-    # print("final: ", videos1.size(), videos2.size())
+
     evaluator.empty_fake_stats()
     evaluator.compute_fake_stats(evaluator.load_videos(".pt", data_type="video_torch", video_data=videos2))
     score_fvd = evaluator.compute_fvd_from_stats()
@@ -1279,7 +1200,7 @@ def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, s
     return score_fvd
 
 
-def eval_optical_flow(real_videos, fake_videos):
+def eval_optical_flow(real_videos, fake_videos, num_frames=8):
     # # torch.Size([11, 25, 3, 64, 64]) torch.Size([11, 25, 3, 64, 64])
     model = Pips(stride=4).cuda()
     parameters = list(model.parameters())
@@ -1296,7 +1217,6 @@ def eval_optical_flow(real_videos, fake_videos):
             fake_video = fake_videos[video_idx].unsqueeze(0)
 
             # print(trajs_e.size())  # torch.Size([1, 8, 256, 2])
-            num_frames = 8
             real_video = real_video[:, ::3, :, :, :][:, :num_frames, :, :, :]  # Shape: [1, 8, 3, 360, 640]
             fake_video = fake_video[:, ::3, :, :, :][:, :num_frames, :, :, :]  # Shape: [1, 8, 3, 360, 640]
 
@@ -1341,10 +1261,10 @@ def eval_optical_flow(real_videos, fake_videos):
 
     # fid_results = np.sum(fid_avg) / len(fid_avg)
     # print("score: ", np.sum(total_distance1) / N)
-    return np.median(total_distance1)
+    return np.mean(total_distance1)
 
 
-def process_video_tensor(input_tensor, num_frames=8, similarity_threshold=0.99, block_size=16, top_ratio=0.01):
+def process_video_tensor(input_tensor, num_frames=8, similarity_threshold=0.99, block_size=16, top_ratio=0.05):
     """
     Process the input tensor of shape (1, 8, 3, 360, 640), where:
     - 1: batch size (can be adjusted)
@@ -1474,8 +1394,6 @@ def decode_latents(latents, vae, num_frames, decode_chunk_size=14):
 def main_eval(
         pretrained_model_path: str,
         validation_data: Dict,
-        train_data: Dict,
-        dataset_types: Tuple[str] = 'json',
         seed: Optional[int] = None,
         eval_file=None,
         **kwargs
@@ -1483,36 +1401,28 @@ def main_eval(
     if seed is not None:
         set_seed(seed)
     # Load scheduler, tokenizer and models.
-    pipeline, tokenizer, feature_extractor, train_scheduler, vae_processor, text_encoder, vae, unet, sig1, sig2, \
-    sig3, video_encoder, video_encoder_hidden, camera_fourier, tx_fourier, img1, img2 = load_primary_models(
-        pretrained_model_path, validation_data.n_sample_frames, validation_data.frame_step, validation_data.n_input_frames,
-        validation_data.width, validation_data.height, eval=True)
-
+    pipeline, tokenizer, feature_extractor, train_scheduler, vae_processor, text_encoder, vae, unet = load_primary_models(
+        pretrained_model_path, eval=True)
     device = torch.device("cuda")
     pipeline.to(device)
 
-    output_dir = "output/svd_infrared_v3_compact"
+    if eval_file is not None:
+        eval_list = json.load(open(eval_file))
+    else:
+        eval_list = [[validation_data.prompt_image, validation_data.prompt]]
 
-    out_file = f"{output_dir}/samples/"
-
-    train_datasets = get_train_dataset(dataset_types, train_data, tokenizer)
-    train_dataset = train_datasets[0]
-    # Define the split sizes
-    train_size = int(0.8 * len(train_dataset))
-    test_size = len(train_dataset) - train_size
-
-    # Split the dataset
-    train_dataset, test_dataset = torch.utils.data.random_split(train_dataset, [train_size, test_size])
-    test_dataloader = torch.utils.data.DataLoader(
-        test_dataset,
-        batch_size=1,
-    )
-    for step, batch in enumerate(test_dataloader):
-        pixel_values = batch['pixel_values']
-
-        eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, img2, validation_data, out_file,
-             None)
-    print("save file", out_file)
+    output_dir = "output/svd_vanila_v3_compact"
+    iters = 5
+    for example in eval_list:
+        for t in range(iters):
+            name, prompt = example
+            out_file_dir = f"{output_dir}/{name.split('.')[0]}"
+            os.makedirs(out_file_dir, exist_ok=True)
+            out_file = f"{out_file_dir}/{t}.gif"
+            validation_data.prompt_image = name
+            validation_data.prompt = prompt
+            eval(pipeline, vae_processor, validation_data, out_file, t)
+            print("save file", out_file)
 
 
 if __name__ == "__main__":
