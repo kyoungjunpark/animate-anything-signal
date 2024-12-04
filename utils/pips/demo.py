@@ -7,7 +7,7 @@ import cv2
 from utils.pips import saverloader
 import imageio.v2 as imageio
 from utils.pips.nets.pips import Pips
-from utils.pips.utils.improc import preprocess_color
+from utils.pips.utils.improc import preprocess_color, Summ_writer, preprocess_color
 import random
 import glob
 from utils.pips.utils.basic import print_, print_stats, meshgrid2d
@@ -23,6 +23,12 @@ np.random.seed(125)
 
 
 def run_model(model, rgbs, N, sw, gif_name, masked_coord):
+    if not model:
+        model = Pips(stride=4).cuda()
+        init_dir = "utils/pips/reference_model"
+        assert os.path.exists(init_dir)
+        _ = saverloader.load(init_dir, model)
+
     rgbs = rgbs.cuda().float()  # B, S, C, H, W
 
     B, S, C, H, W = rgbs.shape
@@ -37,22 +43,24 @@ def run_model(model, rgbs, N, sw, gif_name, masked_coord):
     grid_y, grid_x = meshgrid2d(B, N_, N_, stack=False, norm=False, device='cuda')
     grid_y = 8 + grid_y.reshape(B, -1) / float(N_ - 1) * (H - 16)
     grid_x = 8 + grid_x.reshape(B, -1) / float(N_ - 1) * (W - 16)
-    xy = torch.stack([grid_x, grid_y], dim=-1)  # B, N_*N_, 2
+    xy = torch.stack([grid_x, grid_y], dim=-1)  # B, N_*N_,
+    writer_t = SummaryWriter('tmp', max_queue=10, flush_secs=60)
 
-    coordinates_list = list(masked_coord)
-    # Convert the list to a tensor
-    coordinates_tensor = torch.tensor(coordinates_list, dtype=torch.int64)
-    # coordinates_tensor += 8
-    # coordinates_tensor = coordinates_tensor[:, [1, 0]]
-    # Pad or truncate to fit the shape (1, 256, 2)
+    if masked_coord:
+        coordinates_list = list(masked_coord)
+        # Convert the list to a tensor
+        coordinates_tensor = torch.tensor(coordinates_list, dtype=torch.int64)
+        # coordinates_tensor += 8
+        # coordinates_tensor = coordinates_tensor[:, [1, 0]]
+        # Pad or truncate to fit the shape (1, 256, 2)
 
-    # Reshape the tensor to shape (1, 256, 2)
-    coordinates_tensor = coordinates_tensor.unsqueeze(0)
+        # Reshape the tensor to shape (1, 256, 2)
+        coordinates_tensor = coordinates_tensor.unsqueeze(0)
 
-    # The final tensor shape should be (1, 256, 2)
-    # print(xy)
-    # print(coordinates_tensor)
-    xy = coordinates_tensor.cuda()
+        # The final tensor shape should be (1, 256, 2)
+        # print(xy)
+        # print(coordinates_tensor)
+        xy = coordinates_tensor.cuda()
 
     _, S, C, H, W = rgbs.shape
 
@@ -60,11 +68,6 @@ def run_model(model, rgbs, N, sw, gif_name, masked_coord):
     preds, preds_anim, vis_e, stats = model(xy, rgbs, iters=6)
     trajs_e = preds[-1]
     print_stats('trajs_e', trajs_e)  # min = -63.76, mean = 230.17, max = 632.00 torch.Size([1, 8, 256, 2])
-
-    pad = 50
-    rgbs = F.pad(rgbs.reshape(B * S, 3, H, W), (pad, pad, pad, pad), 'constant', 0).reshape(B, S, 3, H + pad * 2,
-                                                                                            W + pad * 2)
-    trajs_e = trajs_e + pad
 
     return trajs_e
 
@@ -166,9 +169,11 @@ def main():
     global_step = 0
 
     model = Pips(stride=4).cuda()
+    init_dir = "reference_model"
+    assert os.path.exists(init_dir)
+    _ = saverloader.load(init_dir, model)
+
     parameters = list(model.parameters())
-    if init_dir:
-        _ = saverloader.load(init_dir, model)
     global_step = 0
     model.eval()
 
