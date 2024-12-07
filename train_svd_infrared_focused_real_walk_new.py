@@ -162,7 +162,7 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
     video_encoder_hidden = VideoEncoderHidden(target_h=width // 8, target_w=height // 8
                                               , n_input_frames=n_input_frames, latent_dim=encoder_hidden_dim)
 
-    final_encoder = MultiConv1DLayer(in_channels=2)
+    final_encoder = MultiConv1DLayer(in_channels=5)
 
     return pipeline, None, pipeline.feature_extractor, pipeline.scheduler, pipeline.image_processor, \
            pipeline.image_encoder, pipeline.vae, pipeline.unet, signal_encoder, signal_encoder2, signal_encoder3, \
@@ -1023,7 +1023,7 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, video_encoder, video_encoder
         directory = os.path.dirname(target_file)
         # Create the directory if it doesn't exist
         os.makedirs(directory, exist_ok=True)
-        print(image)
+
         # pimg = Image.open(image)
         vr = decord.VideoReader(image)
         frame_range = list(range(0, len(vr), frame_step))
@@ -1278,12 +1278,7 @@ def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, s
 
 def eval_optical_flow(real_videos, fake_videos, num_frames=8):
     # # torch.Size([11, 25, 3, 64, 64]) torch.Size([11, 25, 3, 64, 64])
-    model = Pips(stride=4).cuda()
-    parameters = list(model.parameters())
-    global_step = 0
-    model.eval()
 
-    global_step += 1
     N = 16 ** 2  # number of points to track
 
     total_distance1 = []
@@ -1305,9 +1300,10 @@ def eval_optical_flow(real_videos, fake_videos, num_frames=8):
             mask_final = real_mask | fake_mask
             # print(int(real_video.size(3) / 30), len(real_mask), len(fake_mask), len(mask_final))
             # 17 48 48 69
+
             assert len(mask_final) < 256, (real_mask, fake_mask)
-            trajs_real = run_model(model, real_video, N, None, None, mask_final)  # torch.Size([1, 8, 3, 360, 640])
-            trajs_fake = run_model(model, fake_video, N, None, None, mask_final)
+            trajs_real = run_model(None, real_video, N, None, str(video_idx) + "real", mask_final)  # torch.Size([1, 8, 3, 360, 640])
+            trajs_fake = run_model(None, fake_video, N, None, str(video_idx) + "fake", mask_final)
 
             # mask_final = mask_real | mask_fake
             # trajs_real = real_video * mask_final
@@ -1337,6 +1333,7 @@ def eval_optical_flow(real_videos, fake_videos, num_frames=8):
 
     # fid_results = np.sum(fid_avg) / len(fid_avg)
     # print("score: ", np.sum(total_distance1) / N)
+    print("total_distance1", total_distance1)
     return np.mean(total_distance1)
 
 

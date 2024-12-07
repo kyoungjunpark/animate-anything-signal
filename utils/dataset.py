@@ -264,13 +264,8 @@ def get_frame_agg_infrared_batch(signal_path, initial_signal_path, tx_path, vr_i
 
 
 def get_frame_agg_infrared_real_batch(vr_infrared, max_frames, sample_fps, vr, transform, empty_room_ratio):
-    native_fps = vr.get_avg_fps()
-    max_range = len(vr)
-    rgb_frame_step = max(1, round(native_fps / sample_fps))
 
-    native_fps = vr_infrared.get_avg_fps()
-    max_range = len(vr_infrared)
-    inf_frame_step = max(1, round(native_fps / sample_fps))
+    max_range = min(len(vr_infrared), len(vr))
     # frame_step = max(rgb_frame_step, inf_frame_step)
     frame_step = 3
 

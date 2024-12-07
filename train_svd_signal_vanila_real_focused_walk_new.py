@@ -720,9 +720,9 @@ def main(
         train_dataset = torch.utils.data.ConcatDataset(train_datasets)
 
         # DataLoaders creation:
-
+    print("Number of training dataset: ", len(train_dataset))
     # Define the split sizes
-    n = 10
+    n = 25
     interval = len(train_dataset) // n
     test_dataset = [train_dataset[i] for i in range(0, len(train_dataset), interval)][:n]
 
