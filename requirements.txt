@@ -17,6 +17,7 @@ easydict
 rotary_embedding_torch
 imageio[ffmpeg]
 gradio
+mediapipe
 httpx[socks]
 # numpy==1.26.4
 numpy

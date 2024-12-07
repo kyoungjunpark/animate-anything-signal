@@ -136,7 +136,7 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
 
     # signal_encoder = LatentSignalEncoder(output_dim=encoder_hidden_dim)
     # signal_encoder = SignalEncoder(input_size=CHIRP_LEN, frame_step=2, output_size=encoder_hidden_dim)
-    image_encoder = CompactImageReduction(input_dim=4, frame_step=frame_step, n_input_frames=n_input_frames, target_h=width // 8, target_w=height // 8)
+    image_encoder = CompactImageReduction(input_dim=4, frame_step=frame_step, n_input_frames=n_input_frames, target_h=height // 8, target_w=width // 8)
 
     # for intiial signal
     n_input_frames += 1
@@ -150,8 +150,8 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
     input_latents_dim2 = 100
 
     # signal_encoder2 = LatentSignalEncoder(output_dim=input_latents_dim1 * input_latents_dim2)
-    signal_encoder2 = CompactSignalEncoder3(signal_data_dim=CHIRP_LEN, fps=fps, frame_step=frame_step, target_h=width // 8, target_w=height // 8)
-    signal_encoder3 = CompactSignalTransformer2(input_size=CHIRP_LEN, frame_step=frame_step, n_input_frames=n_input_frames, target_h=width // 8, target_w=height // 8)
+    signal_encoder2 = CompactSignalEncoder3(signal_data_dim=CHIRP_LEN, fps=fps, frame_step=frame_step, target_h=height // 8, target_w=width // 8)
+    signal_encoder3 = CompactSignalTransformer2(input_size=CHIRP_LEN, frame_step=frame_step, n_input_frames=n_input_frames, target_h=height // 8, target_w=width // 8)
 
     # Embed specific AP's location as bounding box
     # x_min, y_min, z_min, x_max, y_max, z_max
@@ -159,8 +159,8 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
     # 3 x 8 x 2 = 48
     # 4 x 8 x 2 = 64
     fourier_freqs = 8
-    camera_fourier_embedder = FourierEmbedder(num_freqs=fourier_freqs, output_dim=4*4*fourier_freqs*2, temperature=2, target_h=width // 8, target_w=height // 8)
-    tx_fourier_embedder = FourierEmbedder(num_freqs=fourier_freqs, output_dim=3*fourier_freqs*2, temperature=2, target_h=width // 8, target_w=height // 8)
+    camera_fourier_embedder = FourierEmbedder(num_freqs=fourier_freqs, output_dim=4*4*fourier_freqs*2, temperature=2, target_h=height // 8, target_w=width // 8)
+    tx_fourier_embedder = FourierEmbedder(num_freqs=fourier_freqs, output_dim=3*fourier_freqs*2, temperature=2, target_h=height // 8, target_w=width // 8)
 
     final_encoder = MultiConv1DLayer()
     return pipeline, None, pipeline.feature_extractor, pipeline.scheduler, pipeline.image_processor, \
@@ -659,14 +659,14 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
         new_frames = (pixel_values + 1) * 127.5
         new_frames = new_frames.cpu()
 
-        model_pred = predict_x0.detach()
-        vae.to(dtype=torch.float32)
+        model_pred = predict_x0.detach().half()
+        # vae.to(dtype=torch.float32)
         new_model_pred = decode_latents(model_pred, vae, 25, 7)
         new_model_pred = new_model_pred.cpu()
         # new_model_pred = (new_model_pred + 1) * 127.5
         vae_scale_factor = 2 ** (len(vae.config.block_out_channels) - 1)
         image_processor = VaeImageProcessor(vae_scale_factor=vae_scale_factor)
-
+        # vae.to(dtype=torch.float16)
         new_model_pred = svd_tensor2vid(new_model_pred, image_processor, output_type="pil")
 
         # assert len(new_model_pred) == 2
@@ -688,11 +688,10 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
         assert len(skeletons1) == len(skeletons2), "The number of frames must match"
 
         total_distance = []
-        total_frames = len(skeletons1)
         total_keypoints = skeletons1[0].shape[0]  # Assumes all frames have the same number of keypoints
 
         # Iterate through each frame (each element in the list)
-        for i in range(total_frames):
+        for i in range(len(skeletons1)):
             frame1 = skeletons1[i]
             frame2 = skeletons2[i]
 
@@ -705,12 +704,15 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
             total_distance.append(np.sum(dist))
 
         # Average distance (normalized by the number of keypoints and frames)
-        avg_distance = np.mean(total_distance) * 0.001
-        # transform = transforms.ToTensor()
-        # tensor_images = [transform(img) for img in video_frames]
+        if total_distance:
+            avg_distance = np.mean(total_distance) * 0.001
+        else:
+            avg_distance = 0
+        transform = transforms.ToTensor()
+        tensor_images = [transform(img) for img in new_model_pred]
 
         # Stack the tensors into a single tensor
-        video_frames = torch.stack(new_model_pred)
+        video_frames = torch.stack(tensor_images)
         video_frames = video_frames.unsqueeze(0)
         new_frames = new_frames.unsqueeze(0)
         optic_flow = eval_optical_flow(video_frames, new_frames) * 0.001  # 55.24
@@ -718,6 +720,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
     loss += ((predict_x0 - latents) ** 2 * loss_weight).mean() # # 0.05
     loss += avg_distance # # 16.45 -> 0.016
     loss += optic_flow  # # 16.45 -> 0.016
+
     # skeleton loss
     # optical flow loss
     return loss
@@ -961,7 +964,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("wifi_ours_pips_solved")
+        accelerator.init_trackers("wifi_ours_pips_solved_pose_loss")
         wandb.login(key="a94ace7392048e560ce6962a468101c6f0158b55")
         wandb.require("core")
         wandb.init()
@@ -1244,8 +1247,7 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
 
         if preview:
             fps = validation_data.get('fps', 8)
-            print("last1", type(video_frames))
-            print("last2", video_frames.size)
+
             imageio.mimwrite(target_file, video_frames, duration=int(1000 / fps), loop=0)
             imageio.mimwrite(target_file.replace('.gif', '.mp4'), video_frames, fps=fps)
             # resized_frames = [np.array(cv2.resize(frame, (125, 125))) for frame in np.array(video_frames)]
