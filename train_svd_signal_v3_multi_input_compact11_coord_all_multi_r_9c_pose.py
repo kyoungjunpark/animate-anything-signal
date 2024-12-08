@@ -511,7 +511,7 @@ def prompt_image(image, processor, encoder):
 
 
 def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
-                  rescale_schedule, offset_noise_strength, unet, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, final_encoder, n_input_frames, pose,
+                  rescale_schedule, offset_noise_strength, unet, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, final_encoder, n_input_frames, pose, image_processor,
                   P_mean=0.7, P_std=1.6):
     pipeline.vae.eval()
     pipeline.image_encoder.eval()
@@ -660,12 +660,11 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
         new_frames = new_frames.cpu()
 
         model_pred = predict_x0.detach().half()
+        # model_pred = predict_x0.half()
         # vae.to(dtype=torch.float32)
         new_model_pred = decode_latents(model_pred, vae, 25, 7)
         new_model_pred = new_model_pred.cpu()
-        # new_model_pred = (new_model_pred + 1) * 127.5
-        vae_scale_factor = 2 ** (len(vae.config.block_out_channels) - 1)
-        image_processor = VaeImageProcessor(vae_scale_factor=vae_scale_factor)
+
         # vae.to(dtype=torch.float16)
         new_model_pred = svd_tensor2vid(new_model_pred, image_processor, output_type="pil")
 
@@ -878,7 +877,7 @@ def main(
         train_dataset = torch.utils.data.ConcatDataset(train_datasets)
 
         # DataLoaders creation:
-
+    print("Number of training dataset: ", len(train_dataset))
     # Define the split sizes
     n = 50
     interval = len(train_dataset) // n
@@ -991,7 +990,9 @@ def main(
     # Initialize MediaPipe Pose detector
     mp_pose = mp.solutions.pose
     pose = mp_pose.Pose(min_detection_confidence=0.3, min_tracking_confidence=0.3)
-
+    with accelerator.autocast():
+        vae_scale_factor = 2 ** (len(pipeline.vae.config.block_out_channels) - 1)
+        image_processor = VaeImageProcessor(vae_scale_factor=vae_scale_factor)
 
     # *Potentially* Fixes gradient checkpointing training.
     # See: https://github.com/prigoyal/pytorch_memonger/blob/master/tutorial/Checkpointing_for_PyTorch_models.ipynb
@@ -1032,7 +1033,7 @@ def main(
                     loss = finetune_unet(accelerator, pipeline, batch, use_offset_noise,
                                          rescale_schedule, offset_noise_strength, unet, vae_processor, sig1, sig2, sig3, camera_fourier,
                                          tx_fourier, img1, final_encoder,
-                                         train_data.n_input_frames, pose)
+                                         train_data.n_input_frames, pose, image_processor)
                 device = loss.device
                 # Gather the losses across all processes for logging (if we use distributed training).
                 avg_loss = accelerator.gather(loss.repeat(train_batch_size)).mean()
@@ -1355,8 +1356,8 @@ def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, s
 
         video_frames = torch.stack([torch.from_numpy(np.array(img)) for img in video_frames])
         video_frames = video_frames.permute(0, 3, 1, 2)  # (batch_size, H, W, C) -> (batch_size, C, H, W)
-        vae_scale_factor = 2 ** (len(vae.config.block_out_channels) - 1)
-        image_processor = VaeImageProcessor(vae_scale_factor=vae_scale_factor)
+
+
         # print("2", pil_images[0])
         transform = T.Compose([
             # T.RandomResizedCrop(size=(height, width), scale=(0.8, 1.0), ratio=(width/height, width/height), antialias=False)
@@ -1456,7 +1457,7 @@ def eval_optical_flow(real_videos, fake_videos, num_frames=8):
     return np.mean(total_distance1)
 
 
-def process_video_tensor(input_tensor, num_frames=8, similarity_threshold=0.99, block_size=16, top_ratio=0.01):
+def process_video_tensor(input_tensor, num_frames=8, similarity_threshold=0.99, block_size=16, top_ratio=0.05):
     """
     Process the input tensor of shape (1, 8, 3, 360, 640), where:
     - 1: batch size (can be adjusted)
