@@ -22,7 +22,7 @@ random.seed(125)
 np.random.seed(125)
 
 
-def run_model(model, rgbs, N, sw, gif_name, masked_coord):
+def run_model(model, rgbs, N, sw, gif_name, masked_coord, do_print=False):
     if not model:
         model = Pips(stride=4).cuda()
         init_dir = "utils/pips/reference_model"
@@ -63,11 +63,12 @@ def run_model(model, rgbs, N, sw, gif_name, masked_coord):
         xy = coordinates_tensor.cuda()
 
     _, S, C, H, W = rgbs.shape
-
-    print_stats('rgbs', rgbs)  # min = 0.00, mean = 106.25, max = 255.00 torch.Size([1, 8, 3, 360, 640])
+    if do_print:
+        print_stats('rgbs', rgbs)  # min = 0.00, mean = 106.25, max = 255.00 torch.Size([1, 8, 3, 360, 640])
     preds, preds_anim, vis_e, stats = model(xy, rgbs, iters=6)
     trajs_e = preds[-1]
-    print_stats('trajs_e', trajs_e)  # min = -63.76, mean = 230.17, max = 632.00 torch.Size([1, 8, 256, 2])
+    if do_print:
+        print_stats('trajs_e', trajs_e)  # min = -63.76, mean = 230.17, max = 632.00 torch.Size([1, 8, 256, 2])
 
     return trajs_e
 

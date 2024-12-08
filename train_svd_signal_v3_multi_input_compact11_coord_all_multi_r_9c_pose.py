@@ -1431,7 +1431,7 @@ def eval_optical_flow(real_videos, fake_videos, num_frames=8):
 
             # trajs_real = trajs_real * mask_final
             # trajs_fake = trajs_fake * mask_final
-            print("Calculate fastdtw for ", trajs_real.size(2))
+            # print("Calculate fastdtw for ", trajs_real.size(2))
             distance_tmp = []
             for i in range(trajs_real.size(2)):  # 256 dimension (index 2)
                 slice_real = trajs_real[0, :, i, :]

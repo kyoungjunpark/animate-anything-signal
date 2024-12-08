@@ -23,7 +23,6 @@ def save(ckpt_dir, optimizer, model, global_step, scheduler=None, model_ema=None
     print("saved a checkpoint: %s" % (model_path))
 
 def load(ckpt_dir, model, optimizer=None, scheduler=None, model_ema=None, step=0, model_name='model', ignore_load=None):
-    print('reading ckpt from %s' % ckpt_dir)
     if not os.path.exists(ckpt_dir):
         print('...there is no full checkpoint here!')
         print('-- note this function no longer appends "saved_checkpoints/" before the ckpt_dir --')
@@ -35,7 +34,7 @@ def load(ckpt_dir, model, optimizer=None, scheduler=None, model_ema=None, step=0
                 step = max(steps)
             model_name = '%s-%09d.pth' % (model_name, step)
             path = os.path.join(ckpt_dir, model_name)
-            print('...found checkpoint %s'%(path))
+            # print('...found checkpoint %s'%(path))
 
             if ignore_load is not None:
                 
