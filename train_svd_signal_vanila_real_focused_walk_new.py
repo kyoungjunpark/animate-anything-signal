@@ -741,7 +741,7 @@ def main(
     if accelerator.is_main_process:
         from utils.cdfvd import fvd
         evaluator = fvd.cdfvd('videomae', ckpt_path='vit_g_hybrid_pt_1200e_ssv2_ft', n_fake='full')
-        if not os.path.exists("fvd_real_infrared_new_walk.stat"):
+        if not os.path.exists("fvd_real_infrared_new_ink.stat"):
             real_videos = []
             for step, batch in enumerate(tqdm(train_dataloader)):
                 if step >= 500:
@@ -772,11 +772,11 @@ def main(
             real_videos = torch.stack(real_videos)
             real_videos = rearrange(real_videos, "b1 b2 f c h w -> (b1 b2) f c h w")
             evaluator.compute_real_stats(evaluator.load_videos(".pt", data_type="video_torch", video_data=real_videos))
-            evaluator.save_real_stats("fvd_real_infrared_new_walk.stat")
+            evaluator.save_real_stats("fvd_real_infrared_new_ink.stat")
             # # Shape: (1, T, C, H, W)
             del real_videos
         else:
-            evaluator.load_real_stats("fvd_real_infrared_new_walk.stat")
+            evaluator.load_real_stats("fvd_real_infrared_new_ink.stat")
 
     # Prepare everything with our `accelerator`.
     unet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
@@ -805,7 +805,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("vanila_real_new_walk_mean_005")
+        accelerator.init_trackers("vanila_real_new_ink")
         wandb.login(key="a94ace7392048e560ce6962a468101c6f0158b55")
         wandb.require("core")
 

@@ -824,7 +824,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("infrared_real_new_walk_mean_005")
+        accelerator.init_trackers("walking ours testing")
         wandb.login(key="a94ace7392048e560ce6962a468101c6f0158b55")
         wandb.require("core")
 
@@ -1027,7 +1027,7 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, video_encoder, video_encoder
         # pimg = Image.open(image)
         vr = decord.VideoReader(image)
         frame_range = list(range(0, len(vr), frame_step))
-        frames = vr.get_batch(frame_range[0:validation_data.num_frames])
+        frames = vr.get_batch(frame_range[25:validation_data.num_frames+25])
 
         if isinstance(frames, torch.Tensor):
             frames = frames.cpu().numpy()  # Convert to a NumPy array if it's a tensor
@@ -1311,7 +1311,7 @@ def eval_optical_flow(real_videos, fake_videos, num_frames=8):
 
             # trajs_real = trajs_real * mask_final
             # trajs_fake = trajs_fake * mask_final
-            print("Calculate fastdtw for ", trajs_real.size(2))
+            # print("Calculate fastdtw for ", trajs_real.size(2))
             distance_tmp = []
             for i in range(trajs_real.size(2)):  # 256 dimension (index 2)
                 slice_real = trajs_real[0, :, i, :]
@@ -1333,7 +1333,7 @@ def eval_optical_flow(real_videos, fake_videos, num_frames=8):
 
     # fid_results = np.sum(fid_avg) / len(fid_avg)
     # print("score: ", np.sum(total_distance1) / N)
-    print("total_distance1", total_distance1)
+    # print("total_distance1", total_distance1)
     return np.mean(total_distance1)
 
 

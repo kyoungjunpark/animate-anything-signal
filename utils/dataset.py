@@ -667,9 +667,13 @@ class VideoBLIPDataset_V2(Dataset):
                 'dataset': self.__getname__(),
             }
         elif vid_data[self.infrared_data_key] is not None and vid_data[self.sig_data_key] is None:
-            vr_infrared = decord.VideoReader(vid_data[self.infrared_data_key])
-            video, video_infrared, frame_step  \
-                = get_frame_agg_infrared_real_batch(vr_infrared, self.n_sample_frames, self.fps, vr, self.transform, self.empty_room_ratio)
+            try:
+                vr_infrared = decord.VideoReader(vid_data[self.infrared_data_key])
+                video, video_infrared, frame_step  \
+                    = get_frame_agg_infrared_real_batch(vr_infrared, self.n_sample_frames, self.fps, vr, self.transform, self.empty_room_ratio)
+            except Exception:
+                print(self.infrared_data_key, vid_data[self.infrared_data_key])
+                raise Exception
             # video = get_frame_batch(self.n_sample_frames, self.fps, vr, self.transform)
 
             prompt_ids = np.array(0)

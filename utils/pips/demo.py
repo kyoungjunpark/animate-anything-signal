@@ -24,10 +24,11 @@ np.random.seed(125)
 
 def run_model(model, rgbs, N, sw, gif_name, masked_coord, do_print=False):
     if not model:
-        model = Pips(stride=4).cuda()
-        init_dir = "utils/pips/reference_model"
-        assert os.path.exists(init_dir)
-        _ = saverloader.load(init_dir, model)
+        raise ValueError("Model must be pre-loaded and passed as an argument")
+        # model = Pips(stride=4).cuda()
+        # init_dir = "utils/pips/reference_model"
+        # assert os.path.exists(init_dir)
+        # _ = saverloader.load(init_dir, model)
 
     rgbs = rgbs.cuda().float()  # B, S, C, H, W
 
@@ -44,23 +45,17 @@ def run_model(model, rgbs, N, sw, gif_name, masked_coord, do_print=False):
     grid_y = 8 + grid_y.reshape(B, -1) / float(N_ - 1) * (H - 16)
     grid_x = 8 + grid_x.reshape(B, -1) / float(N_ - 1) * (W - 16)
     xy = torch.stack([grid_x, grid_y], dim=-1)  # B, N_*N_,
-    writer_t = SummaryWriter('tmp', max_queue=10, flush_secs=60)
+    # writer_t = SummaryWriter('tmp', max_queue=10, flush_secs=60)
 
-    if masked_coord:
-        coordinates_list = list(masked_coord)
+    if masked_coord is not None:
         # Convert the list to a tensor
-        coordinates_tensor = torch.tensor(coordinates_list, dtype=torch.int64)
+        xy = torch.tensor(list(masked_coord), dtype=torch.int64, device='cuda').unsqueeze(0)
         # coordinates_tensor += 8
         # coordinates_tensor = coordinates_tensor[:, [1, 0]]
         # Pad or truncate to fit the shape (1, 256, 2)
-
-        # Reshape the tensor to shape (1, 256, 2)
-        coordinates_tensor = coordinates_tensor.unsqueeze(0)
-
         # The final tensor shape should be (1, 256, 2)
         # print(xy)
         # print(coordinates_tensor)
-        xy = coordinates_tensor.cuda()
 
     _, S, C, H, W = rgbs.shape
     if do_print:
@@ -70,6 +65,9 @@ def run_model(model, rgbs, N, sw, gif_name, masked_coord, do_print=False):
     if do_print:
         print_stats('trajs_e', trajs_e)  # min = -63.76, mean = 230.17, max = 632.00 torch.Size([1, 8, 256, 2])
 
+    # Clean up to avoid memory leaks
+    del rgbs, grid_x, grid_y, xy
+    torch.cuda.empty_cache()
     return trajs_e
 
 

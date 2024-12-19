@@ -148,9 +148,9 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
     # signal_encoder = LatentSignalEncoder(output_dim=encoder_hidden_dim)
     # signal_encoder = SignalEncoder(input_size=CHIRP_LEN, frame_step=2, output_size=encoder_hidden_dim)
     image_encoder = CompactImageReduction2(input_dim=4, frame_step=frame_step, n_input_frames=n_input_frames,
-                                           target_h=width // 8, target_w=height // 8, encoder_hidden_dim=encoder_hidden_dim)
+                                           target_h=height // 8, target_w=width // 8, encoder_hidden_dim=encoder_hidden_dim)
 
-    image_encoder2 = CompactImageReduction(input_dim=4, frame_step=frame_step, n_input_frames=n_input_frames, target_h=width // 8, target_w=height // 8)
+    image_encoder2 = CompactImageReduction(input_dim=4, frame_step=frame_step, n_input_frames=n_input_frames, target_h=height // 8, target_w=width // 8)
 
     # for intiial signal
     # n_input_frames += 1
@@ -164,8 +164,8 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
     input_latents_dim2 = 100
 
     # signal_encoder2 = LatentSignalEncoder(output_dim=input_latents_dim1 * input_latents_dim2)
-    signal_encoder2 = CompactSignalEncoder3_2(signal_data_dim=CHIRP_LEN, output_dim=1, fps=fps, frame_step=frame_step, target_h=width // 8, target_w=height // 8)
-    signal_encoder3 = CompactSignalTransformer2(input_size=CHIRP_LEN, output_dim=1, frame_step=frame_step, n_input_frames=n_input_frames, target_h=width // 8, target_w=height // 8)
+    signal_encoder2 = CompactSignalEncoder3_2(signal_data_dim=CHIRP_LEN, output_dim=1, fps=fps, frame_step=frame_step, target_h=height // 8, target_w=width // 8)
+    signal_encoder3 = CompactSignalTransformer2(input_size=CHIRP_LEN, output_dim=1, frame_step=frame_step, n_input_frames=n_input_frames, target_h=height // 8, target_w=width // 8)
 
     # Embed specific AP's location as bounding box
     # x_min, y_min, z_min, x_max, y_max, z_max
@@ -173,8 +173,8 @@ def load_primary_models(pretrained_model_path, fps, frame_step, n_input_frames, 
     # 3 x 8 x 2 = 48
     # 4 x 8 x 2 = 64
     fourier_freqs = 8
-    camera_fourier_embedder = FourierEmbedder(num_freqs=fourier_freqs, output_dim=4*4*fourier_freqs*2, temperature=2, target_h=width // 16, target_w=height // 16)
-    tx_fourier_embedder = FourierEmbedder(num_freqs=fourier_freqs, output_dim=3*fourier_freqs*2, temperature=2, target_h=width // 16, target_w=height // 16)
+    camera_fourier_embedder = FourierEmbedder(num_freqs=fourier_freqs, output_dim=4*4*fourier_freqs*2, temperature=2, target_h=height // 16, target_w=width // 16)
+    tx_fourier_embedder = FourierEmbedder(num_freqs=fourier_freqs, output_dim=3*fourier_freqs*2, temperature=2, target_h=height // 16, target_w=width // 16)
 
     return pipeline, None, pipeline.feature_extractor, pipeline.scheduler, pipeline.image_processor, \
            pipeline.image_encoder, pipeline.vae, pipeline.unet, signal_encoder, signal_encoder2, signal_encoder3,\
@@ -753,7 +753,7 @@ def main(
     if accelerator.is_main_process:
         from utils.cdfvd import fvd
         evaluator = fvd.cdfvd('videomae', ckpt_path='vit_g_hybrid_pt_1200e_ssv2_ft', n_fake='full')
-        if not os.path.exists("fvd_sim_infrared.stat"):
+        if not os.path.exists("fvd_sim_infrared_bright.stat"):
             real_videos = []
             for step, batch in enumerate(tqdm(train_dataloader)):
                 if step >= 500:
@@ -784,11 +784,11 @@ def main(
             real_videos = torch.stack(real_videos)
             real_videos = rearrange(real_videos, "b1 b2 f c h w -> (b1 b2) f c h w")
             evaluator.compute_real_stats(evaluator.load_videos(".pt", data_type="video_torch", video_data=real_videos))
-            evaluator.save_real_stats("fvd_sim_infrared.stat")
+            evaluator.save_real_stats("fvd_sim_infrared_bright.stat")
             # # Shape: (1, T, C, H, W)
             del real_videos
         else:
-            evaluator.load_real_stats("fvd_sim_infrared.stat")
+            evaluator.load_real_stats("fvd_sim_infrared_bright.stat")
 
     # Prepare everything with our `accelerator`.
     unet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
@@ -817,7 +817,7 @@ def main(
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("infrared_vanila_sim_2+2optics")
+        accelerator.init_trackers("vanila_infrared_bright_sim_pip_solved")
         wandb.login(key="a94ace7392048e560ce6962a468101c6f0158b55")
         wandb.require("core")
 
@@ -929,7 +929,7 @@ def main(
 
                         eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, img1, img2, validation_data, out_file, global_step)
                         logger.info(f"Saved a new sample to {out_file}")
-                        if global_step <= 5 or global_step > 4000:
+                        if global_step <= 5 or global_step > 6000:
                             fvd = eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor,
                                                         sig1, sig2,
                                                         sig3, camera_fourier, tx_fourier, img1, img2, None,
@@ -997,8 +997,6 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
         # print(out_file)
         # print(image)
 
-        camera_pose = image.replace(".mp4", ".npy")
-
         image_replaced = image.replace("frame", str(index) + "_frame").replace('.mp4', '.gif')
         target_file = out_file + image_replaced
         # print(out_file)
@@ -1026,10 +1024,6 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
         # video = transform(video)
         # video = normalize_input(video)
 
-        camera_data = np.load(camera_pose)
-
-        camera_data = torch.from_numpy(camera_data).to(dtype).to(device)
-
         with torch.no_grad():
             if motion_mask:
                 # h, w = validation_data.height // pipeline.vae_scale_factor, validation_data.width // pipeline.vae_scale_factor
@@ -1049,7 +1043,7 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, camera_fourier, tx_fourier, 
                     n_input_frames=validation_data.n_input_frames,
                     signal_latent=None,
                     signal=None,
-                    camera_pose=camera_data,
+                    camera_pose=None,
                     tx_pos=None,
                     sig1=sig1,
                     sig2=sig2,
@@ -1109,7 +1103,6 @@ def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, s
     videos1 = []
     videos2 = []
     for step, batch in enumerate(tqdm(test_dataloader)):
-        pixel_values = batch['pixel_values'].to(dtype)
         image_path = batch['pixel_values_path']
         # image
         vr = decord.VideoReader(image_path[0])
@@ -1128,9 +1121,6 @@ def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, s
             pil_images.append(pil_image)
 
         # camera_data = np.load(camera_pose)
-        # tx_data = np.loadtxt(tx_loc)
-
-        camera_data = batch['camera_pose'].float().half().to(device).squeeze(0)
 
         with torch.no_grad():
             # h, w = validation_data.height // pipeline.vae_scale_factor, validation_data.width // pipeline.vae_scale_factor
@@ -1150,7 +1140,7 @@ def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, s
                 n_input_frames=validation_data.n_input_frames,
                 signal_latent=None,
                 signal=None,
-                camera_pose=camera_data,
+                camera_pose=None,
                 tx_pos=None,
                 sig1=sig1,
                 sig2=sig2,
@@ -1218,14 +1208,9 @@ def eval_fid_fvd_videomae(evaluator, test_dataloader, pipeline, vae_processor, s
     return score_fvd
 
 
-def eval_optical_flow(real_videos, fake_videos):
+def eval_optical_flow(real_videos, fake_videos, num_frames=8):
     # # torch.Size([11, 25, 3, 64, 64]) torch.Size([11, 25, 3, 64, 64])
-    model = Pips(stride=4).cuda()
-    parameters = list(model.parameters())
-    global_step = 0
-    model.eval()
 
-    global_step += 1
     N = 16 ** 2  # number of points to track
 
     total_distance1 = []
@@ -1235,7 +1220,6 @@ def eval_optical_flow(real_videos, fake_videos):
             fake_video = fake_videos[video_idx].unsqueeze(0)
 
             # print(trajs_e.size())  # torch.Size([1, 8, 256, 2])
-            num_frames = 8
             real_video = real_video[:, ::3, :, :, :][:, :num_frames, :, :, :]  # Shape: [1, 8, 3, 360, 640]
             fake_video = fake_video[:, ::3, :, :, :][:, :num_frames, :, :, :]  # Shape: [1, 8, 3, 360, 640]
 
@@ -1248,9 +1232,10 @@ def eval_optical_flow(real_videos, fake_videos):
             mask_final = real_mask | fake_mask
             # print(int(real_video.size(3) / 30), len(real_mask), len(fake_mask), len(mask_final))
             # 17 48 48 69
+
             assert len(mask_final) < 256, (real_mask, fake_mask)
-            trajs_real = run_model(model, real_video, N, None, None, mask_final)  # torch.Size([1, 8, 3, 360, 640])
-            trajs_fake = run_model(model, fake_video, N, None, None, mask_final)
+            trajs_real = run_model(None, real_video, N, None, str(video_idx) + "real", mask_final)  # torch.Size([1, 8, 3, 360, 640])
+            trajs_fake = run_model(None, fake_video, N, None, str(video_idx) + "fake", mask_final)
 
             # mask_final = mask_real | mask_fake
             # trajs_real = real_video * mask_final
@@ -1258,7 +1243,7 @@ def eval_optical_flow(real_videos, fake_videos):
 
             # trajs_real = trajs_real * mask_final
             # trajs_fake = trajs_fake * mask_final
-            print("Calculate fastdtw for ", trajs_real.size(2))
+            # print("Calculate fastdtw for ", trajs_real.size(2))
             distance_tmp = []
             for i in range(trajs_real.size(2)):  # 256 dimension (index 2)
                 slice_real = trajs_real[0, :, i, :]
@@ -1280,10 +1265,11 @@ def eval_optical_flow(real_videos, fake_videos):
 
     # fid_results = np.sum(fid_avg) / len(fid_avg)
     # print("score: ", np.sum(total_distance1) / N)
-    return np.median(total_distance1)
+    # print("total_distance1", total_distance1)
+    return np.mean(total_distance1)
 
 
-def process_video_tensor(input_tensor, num_frames=8, similarity_threshold=0.99, block_size=16, top_ratio=0):
+def process_video_tensor(input_tensor, num_frames=8, similarity_threshold=0.99, block_size=16, top_ratio=0.05):
     """
     Process the input tensor of shape (1, 8, 3, 360, 640), where:
     - 1: batch size (can be adjusted)
@@ -1350,7 +1336,7 @@ def process_video_tensor(input_tensor, num_frames=8, similarity_threshold=0.99, 
     # Sort blocks by score (highest motion score first)
     motion_block_scores.sort(key=lambda x: x[1], reverse=True)
     # Select the top 10% most dynamic blocks
-    num_top_blocks = max(2, int(len(motion_block_scores) * top_ratio))
+    num_top_blocks = max(1, int(len(motion_block_scores) * top_ratio))
     top_blocks = set([motion_block_scores[i][0] for i in range(num_top_blocks)])
     # Create the mask to black out dynamic parts in each frame (based on blocks)
     masked_frames = []
