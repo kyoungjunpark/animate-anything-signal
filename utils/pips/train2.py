@@ -164,7 +164,7 @@ def main(
     
     exp_name = '00' # copy from train.py
     exp_name = '01' # quick
-    # i think the next step is to set up pointodyssey here
+    # i think_processed the next step is to set up pointodyssey here
     exp_name = '02' # pointodyssey
     exp_name = '03' # fps sampling
     exp_name = '04' # shuffle = False

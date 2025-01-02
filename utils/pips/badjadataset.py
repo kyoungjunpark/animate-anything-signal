@@ -114,7 +114,7 @@ class SMALJointInfo():
 
         self.annotated_joint_region = self.joint_regions[self.annotated_classes]
         self.region_colors = np.array([
-            [250, 190, 190], # body, light pink
+            [250, 190, 190], # body, light pink_processed
             [60, 180, 75], # upper_right, green
             [230, 25, 75], # upper_left, red
             [128, 0, 0], # neck, maroon
@@ -123,7 +123,7 @@ class SMALJointInfo():
             [240, 50, 230], # tail, majenta
             [245, 130, 48], # jaw / nose / chin, orange
             [29, 98, 115], # right_ear, turquoise
-            [255, 153, 204]]) # left_ear, pink
+            [255, 153, 204]]) # left_ear, pink_processed
         
         self.joint_colors = np.array(self.region_colors)[self.annotated_joint_region]
 

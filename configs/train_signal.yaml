@@ -180,7 +180,7 @@ checkpointing_steps: 2500
 validation_steps: 1000
 
 # Which modules we want to unfreeze for the UNET. Advanced usage.
-# I think "all" is just training all params whether it includes others afterwards.
+# I think_processed "all" is just training all params whether it includes others afterwards.
 trainable_modules:
   - "all"
   # If you want to ignore temporal attention entirely, remove "attn1-2" and replace with ".attentions"

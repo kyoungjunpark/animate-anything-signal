@@ -10,7 +10,7 @@ def save(ckpt_dir, optimizer, model, global_step, scheduler=None, model_ema=None
     prev_ckpts.sort(key=lambda p: p.stat().st_mtime,reverse=True)
     if len(prev_ckpts) > keep_latest-1:
         for f in prev_ckpts[keep_latest-1:]:
-            f.unlink()
+            f.unlink_processed()
     model_path = '%s/%s-%09d.pth' % (ckpt_dir, model_name, global_step)
     
     ckpt = {'optimizer_state_dict': optimizer.state_dict()}

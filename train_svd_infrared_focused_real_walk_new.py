@@ -1046,7 +1046,7 @@ def eval(pipeline, vae_processor, sig1, sig2, sig3, video_encoder, video_encoder
         vr = decord.VideoReader(infrared)
         frame_step = validation_data.frame_step
         frame_range = list(range(0, len(vr), frame_step))
-        frames = vr.get_batch(frame_range[0:validation_data.num_frames])
+        frames = vr.get_batch(frame_range[25:validation_data.num_frames+25])
 
         if isinstance(frames, torch.Tensor):
             frames = frames.cpu().numpy()  # Convert to a NumPy array if it's a tensor

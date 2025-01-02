@@ -718,7 +718,7 @@ def finetune_unet(accelerator, pipeline, batch, use_offset_noise,
         video_frames = torch.stack(tensor_images).unsqueeze(0)
 
         optic_flow = eval_optical_flow(flow_model, video_frames, new_frames.unsqueeze(0)) * 0.001  # 55.24
-        
+
         del model_pred, new_model_pred, new_frames, pixel_values, tensor_images, video_frames, skeletons1, skeletons2, total_distance
 
     loss += ((predict_x0 - latents) ** 2 * loss_weight).mean()  # # 0.05
