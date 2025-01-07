@@ -142,10 +142,10 @@ def get_frame_signal_batch(signal_path, initial_signal_path, max_frames, sample_
     return video, partial_channels
 
 
-def get_frame_agg_signal_batch(signal_path, initial_signal_path, tx_path, camera_pose_path, max_frames, sample_fps, vr, transform, empty_room_ratio):
+def get_frame_agg_signal_batch(signal_path, initial_signal_path, tx_path, camera_pose_path, max_frames, sample_fps, vr, transform, frame_step, empty_room_ratio):
     native_fps = vr.get_avg_fps()
     max_range = len(vr)
-    frame_step = max(1, round(native_fps / sample_fps))
+    # frame_step = max(1, round(native_fps / sample_fps))
     frame_range = range(0, max_range, frame_step)
     if len(frame_range) < max_frames:
         frame_range = np.linspace(0, max_range - 1, max_frames).astype(int)
@@ -201,11 +201,11 @@ def get_frame_agg_signal_batch(signal_path, initial_signal_path, tx_path, camera
     return video, result_channels, camera_pose, tx_pos, frame_step, human_coords
 
 
-def get_frame_agg_infrared_batch(signal_path, initial_signal_path, tx_path, vr_infrared, camera_pose_path, max_frames, sample_fps, vr, transform, empty_room_ratio):
+def get_frame_agg_infrared_batch(signal_path, initial_signal_path, tx_path, vr_infrared, camera_pose_path, max_frames, sample_fps, vr, transform, frame_step, empty_room_ratio):
 
     max_range = min(len(vr), len(vr_infrared))
     # frame_step = max(rgb_frame_step, inf_frame_step)
-    frame_step = 3
+    # frame_step = 3
 
     frame_range = range(0, max_range, frame_step)
 
@@ -263,11 +263,11 @@ def get_frame_agg_infrared_batch(signal_path, initial_signal_path, tx_path, vr_i
     return video, video_infrared, result_channels, camera_pose, tx_pos, frame_step, human_coords
 
 
-def get_frame_agg_infrared_real_batch(vr_infrared, max_frames, sample_fps, vr, transform, empty_room_ratio):
+def get_frame_agg_infrared_real_batch(vr_infrared, max_frames, sample_fps, vr, transform, frame_step, empty_room_ratio):
 
     max_range = min(len(vr_infrared), len(vr))
     # frame_step = max(rgb_frame_step, inf_frame_step)
-    frame_step = 3
+    # frame_step = 3
 
     frame_range = range(0, max_range, frame_step)
 
@@ -501,6 +501,7 @@ class VideoBLIPDataset_V2(Dataset):
             n_sample_frames: int = 4,
             sample_start_idx: int = 1,
             fps: int = 1,
+            frame_step: int = 3,
             n_input_frames=1,
             empty_room_ratio=0.0,
             json_path: str = "",
@@ -533,6 +534,7 @@ class VideoBLIPDataset_V2(Dataset):
         self.width = width
         self.height = height
 
+        self.frame_step = frame_step
         self.n_sample_frames = n_sample_frames
         self.sample_start_idx = sample_start_idx
         self.fps = fps
@@ -617,7 +619,7 @@ class VideoBLIPDataset_V2(Dataset):
             video, signal, camera_pose, tx_pos, frame_step, human_coords \
                 = get_frame_agg_signal_batch(vid_data[self.sig_data_key], vid_data[self.initial_sig_data_key],
                                              vid_data[self.tx_pos_key], vid_data[self.camera_pose_key], self.n_sample_frames,
-                                                                   self.fps, vr, self.transform, self.empty_room_ratio)
+                                                                   self.fps, vr, self.transform, self.frame_step, self.empty_room_ratio)
             # video = get_frame_batch(self.n_sample_frames, self.fps, vr, self.transform)
 
             # prompt_ids = np.array(0)
@@ -647,7 +649,7 @@ class VideoBLIPDataset_V2(Dataset):
             video, video_infrared, signal, camera_pose, tx_pos, frame_step, human_coords  \
                 = get_frame_agg_infrared_batch(vid_data[self.sig_data_key], vid_data[self.initial_sig_data_key],
                                                vid_data[self.tx_pos_key], vr_infrared, vid_data[self.camera_pose_key],
-                                               self.n_sample_frames, self.fps, vr, self.transform, self.empty_room_ratio)
+                                               self.n_sample_frames, self.fps, vr, self.transform, self.frame_step, self.empty_room_ratio)
             # video = get_frame_batch(self.n_sample_frames, self.fps, vr, self.transform)
 
             prompt_ids = np.array(0)
@@ -670,7 +672,7 @@ class VideoBLIPDataset_V2(Dataset):
             try:
                 vr_infrared = decord.VideoReader(vid_data[self.infrared_data_key])
                 video, video_infrared, frame_step  \
-                    = get_frame_agg_infrared_real_batch(vr_infrared, self.n_sample_frames, self.fps, vr, self.transform, self.empty_room_ratio)
+                    = get_frame_agg_infrared_real_batch(vr_infrared, self.n_sample_frames, self.fps, vr, self.transform, self.frame_step, self.empty_room_ratio)
             except Exception:
                 print(self.infrared_data_key, vid_data[self.infrared_data_key])
                 raise Exception
@@ -694,6 +696,8 @@ class VideoBLIPDataset_V2(Dataset):
             }
         else:
             raise Exception
+        assert frame_step != 3, frame_step
+
         # mask = np.array(0)
         mask = get_moved_area_mask(video.permute([0, 2, 3, 1]).numpy())
         example['mask'] = mask
